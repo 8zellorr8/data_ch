@@ -1,0 +1,11 @@
+# Only backend source and its declared resources enter the build context.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!requirements-lock.txt
+!backend/
+!backend/**/
+!backend/**/*.py
+!backend/default_checklist.json
+!backend/schema.sql
