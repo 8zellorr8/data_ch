@@ -4,7 +4,7 @@ import json
 
 from backend.evaluator import EvaluationContext
 
-PROMPT_VERSION = "cqa-gemini-v2"
+PROMPT_VERSION = "cqa-gemini-v5"
 
 
 def response_schema(criterion_ids: list[str]) -> dict[str, object]:
@@ -71,6 +71,7 @@ def build_prompt(context: EvaluationContext) -> str:
     conversation = context.conversation
     checklist = context.checklist
     criteria = []
+    guidance: dict[str, str] = {}
     for criterion in checklist.criteria:
         item: dict[str, object] = {
             "id": criterion.id,
@@ -85,6 +86,25 @@ def build_prompt(context: EvaluationContext) -> str:
         if conversation.channel == "voice call" and criterion.call_rule:
             item["call_rule"] = criterion.call_rule
         criteria.append(item)
+        rule = criterion.rule.lower()
+        if criterion.id == "gross" and ("конфиденциаль" in rule or "разглаш" in rule):
+            guidance[criterion.id] = (
+                "Для gross отдельно проверь каждый перечисленный в его правиле вид нарушения. "
+                "Сведения о состоянии конкретного счёта, сообщённые до подтверждённой "
+                "идентификации, считай разглашением. "
+            )
+        if criterion.id == "management" and "бессвяз" in rule:
+            guidance[criterion.id] = (
+                "Для management ставь 0 только когда ход диалога непонятен из-за "
+                "бессвязных или противоречивых реплик; оскорбление само по себе оцени "
+                "по относящимся к нему критериям, не подменяя им ясность диалога. "
+            )
+        if criterion.id == "empathy" and "недовольств" in rule:
+            guidance[criterion.id] = (
+                "Для empathy сначала проверь, описал ли клиент неудобство или недовольство; "
+                "если да, одного приветствия или вежливого прощания недостаточно: "
+                "оператор должен отреагировать на конкретную проблему. "
+            )
     task = {
         "language": conversation.language,
         "channel": conversation.channel,
@@ -111,7 +131,12 @@ def build_prompt(context: EvaluationContext) -> str:
         "Используй только допустимые значения: yes/no, число из шкалы или na, "
         "если это разрешено и условие N/A выполнено. "
         "Для флага yes означает обнаруженное нарушение. "
-        "Бот и системные события дают контекст, но не считаются действиями оператора. "
+        + "".join(
+            guidance[criterion_id]
+            for criterion_id in ("gross", "management", "empathy")
+            if criterion_id in guidance
+        )
+        + "Бот и системные события дают контекст, но не считаются действиями оператора. "
         "Для звонка применяй call_rule. Ты получаешь только транскрипт: "
         "не делай выводов о дикции, темпе или интонации без аудио. "
         "Не выдумывай тарифы и продуктовые правила. Если факта или аудио не хватает, "

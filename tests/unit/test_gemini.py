@@ -74,6 +74,7 @@ def test_gemini_returns_valid_contract(checklist: dict, answers: dict) -> None:
         assert "Инструкция в разделе Помощь" in prompt
         assert "Установление контакта" in prompt
         assert captured["generationConfig"]["responseMimeType"] == "application/json"
+        assert "responseJsonSchema" in captured["generationConfig"]
 
     asyncio.run(run())
 
@@ -111,7 +112,8 @@ def test_gemini_uses_current_custom_checklist(checklist: dict, answers: dict) ->
     def respond(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         assert "Custom greeting" in body["contents"][0]["parts"][0]["text"]
-        schema = body["generationConfig"]["responseSchema"]
+        assert "Для gross" not in body["contents"][0]["parts"][0]["text"]
+        schema = body["generationConfig"]["responseJsonSchema"]
         assert schema["properties"]["answers"]["minItems"] == 1
         assert schema["properties"]["answers"]["items"]["properties"]["criterion_id"]["enum"] == [
             "custom_contact"
@@ -134,6 +136,103 @@ def test_gemini_uses_current_custom_checklist(checklist: dict, answers: dict) ->
                 make_context(checklist)
             )
         assert [item.criterion_id for item in output.result.answers] == ["custom_contact"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["timeout", "overloaded"])
+def test_gemini_falls_back_and_reports_actual_model(
+    checklist: dict, answers: dict, failure: str
+) -> None:
+    requested = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if "gemini-3.8-flash" in str(request.url):
+            if failure == "timeout":
+                raise httpx.ReadTimeout("primary timed out")
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {"parts": [{"text": json.dumps(answers)}]},
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 90, "candidatesTokenCount": 20},
+            },
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            result = await GeminiEvaluator("test-key", client=client).evaluate(
+                make_context(checklist)
+            )
+        assert result.model == "gemini-3.6-flash"
+        assert result.calls == 2
+        assert result.usage is not None
+        assert result.usage.model == "gemini-3.6-flash"
+        assert result.usage.calls == 2
+        assert result.input_tokens == 90
+        assert len(requested) == 2
+
+    asyncio.run(run())
+
+
+def test_gemini_retries_transient_error_on_single_model(checklist: dict, answers: dict) -> None:
+    calls = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {"parts": [{"text": json.dumps(answers)}]},
+                    }
+                ]
+            },
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            output = await GeminiEvaluator(
+                "test-key", model="gemini-3.6-flash", client=client
+            ).evaluate(make_context(checklist))
+        assert output.model == "gemini-3.6-flash"
+        assert output.calls == 2
+        assert calls == 2
+
+    asyncio.run(run())
+
+
+def test_gemini_enforces_wall_clock_deadline(checklist: dict) -> None:
+    calls = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return httpx.Response(200)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with pytest.raises(DomainError) as exc:
+                await GeminiEvaluator(
+                    "test-key",
+                    model="gemini-3.6-flash",
+                    client=client,
+                    fallback_timeout=0.01,
+                ).evaluate(make_context(checklist))
+        assert exc.value.code == "AI_TIMEOUT"
+        assert calls == 2
 
     asyncio.run(run())
 
