@@ -33,6 +33,7 @@ from .models import (
 )
 from .reports import ComparisonManifest, QualityReport, QualityReportService, usage_report
 from .services import AppealService, EvaluationService, ImportService
+from .submission import SubmissionDocument, SubmissionRequest, SubmissionService
 from .value_types import Channel, Language
 from .work_models import (
     BatchRecord,
@@ -56,6 +57,7 @@ class ApplicationServices:
     work_store: WorkStore
     tariffs: tuple[Tariff, ...]
     quality: QualityReportService
+    submission: SubmissionService
 
 
 def get_services(request: Request) -> ApplicationServices:
@@ -226,3 +228,10 @@ def cancel_batch(batch_id: str, services: Services) -> BatchRecord:
 @router.post("/api/v1/reports/quality", tags=["reports"])
 def report_quality(payload: ComparisonManifest, services: Services) -> QualityReport:
     return services.quality.generate(payload)
+
+
+@router.post("/api/v1/datasets/{dataset_id}/submission", tags=["export"])
+def submission(
+    dataset_id: str, payload: SubmissionRequest, services: Services
+) -> SubmissionDocument:
+    return services.submission.generate(dataset_id, payload)

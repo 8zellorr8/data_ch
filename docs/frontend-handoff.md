@@ -130,3 +130,11 @@ Copy-Item data/frontend-kit/cqa.postman_collection.json examples/frontend/cqa.po
 Пределы: 1000 пар, 8 MiB; 422 — ошибки выбора, 413 — размер. Отчёт доступен без
 подключённой модели и не передаёт ей эталоны. Подробности и поля —
 [backend-operations.md](backend-operations.md#8-отчёт-качества-по-http) и OpenAPI.
+
+## Выгрузка для сдачи (дополнение JSON 1.0)
+
+Добавлен `POST /api/v1/datasets/{dataset_id}/submission`: принимает выбранный
+завершённый пакет или явные ID исходных AI-оценок, возвращает готовый JSON
+организаторов. Старый архивный экспорт сохранён. Контракт, ошибки, пример тела
+и порядок сохранения файла: [submission.md](submission.md#api-для-frontend-участника).
+Frontend в этом изменении не переделывался; новый маршрут доступен в Swagger.

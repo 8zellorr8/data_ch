@@ -29,6 +29,7 @@ ErrorCode = (
         "EVALUATION_INTERRUPTED",
         "EVALUATION_FAILED",
         "BATCH_QUEUE_FULL",
+        "INVALID_SUBMISSION",
     ]
     | EvaluationErrorCode
 )

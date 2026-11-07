@@ -20,6 +20,7 @@ from .organizer import MAX_BYTES, OrganizerClient
 from .ports import DatasetSource
 from .reports import QualityReportService
 from .services import AppealService, EvaluationService, ImportService
+from .submission import SubmissionService
 from .work_store import WorkStore
 
 
@@ -56,6 +57,7 @@ def create_app(
         work_store=work_store,
         tariffs=settings.tariffs,
         quality=QualityReportService(repository),
+        submission=SubmissionService(repository, work_store),
     )
 
     @asynccontextmanager

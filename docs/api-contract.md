@@ -166,3 +166,9 @@ true означает доказанный ноль для отмены до з�
 не заменяется автоматически. Транскриптов в отчёте нет; модель не вызывается.
 Метрики внутренние, не официальная формула рейтинга. Подробные поля и примеры —
 [backend-operations.md](backend-operations.md), [запросы для UI](../examples/frontend/backend-operations.http).
+
+## Дополнение: результаты для организаторов
+
+`POST /api/v1/datasets/{dataset_id}/submission` — отдельный экспорт JSON 1.0.
+Точный запрос, результат и ограничения: [submission.md](submission.md).
+`GET /api/v1/datasets/{dataset_id}/export` сохраняет прежний формат архива.

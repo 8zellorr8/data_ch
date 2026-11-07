@@ -1,0 +1,7 @@
+{
+  "split": "dev",
+  "team_name": "YOUR_TEAM_NAME",
+  "model_mode": "external_api",
+  "model_names": ["ACTUAL_MODEL_FROM_METADATA"],
+  "batch_id": "BATCH_UUID"
+}
