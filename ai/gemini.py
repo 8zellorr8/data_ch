@@ -4,14 +4,19 @@ import httpx
 from pydantic import ValidationError
 
 from backend.errors import DomainError, InvalidEvaluationResult
-from backend.evaluator import EvaluationContext, EvaluatorOutput
+from backend.evaluator import EvaluationContext, EvaluatorFailure, EvaluatorOutput
 from backend.models import EvaluationResult
 from backend.scoring import validate_result
+from backend.work_models import ProviderUsage
 
 from .prompt import PROMPT_VERSION, build_prompt, response_schema
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def token_count(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 class GeminiEvaluator:
@@ -72,8 +77,27 @@ class GeminiEvaluator:
         if response.status_code != 200:
             # Never expose the response body or API key to users or logs.
             raise DomainError("AI_UNAVAILABLE", f"Gemini API returned HTTP {response.status_code}")
+        usage: ProviderUsage | None = None
         try:
             payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a Gemini response object")
+            metadata = payload.get("usageMetadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            input_tokens = token_count(metadata.get("promptTokenCount"))
+            answer_tokens = token_count(metadata.get("candidatesTokenCount"))
+            thought_tokens = token_count(metadata.get("thoughtsTokenCount"))
+            output_tokens = (
+                answer_tokens + (thought_tokens or 0) if answer_tokens is not None else None
+            )
+            usage = ProviderUsage(
+                model=self.model,
+                calls=1,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                complete=False,
+            )
             candidate = payload["candidates"][0]
             if candidate.get("finishReason") != "STOP":
                 raise ValueError("Gemini did not finish its response")
@@ -84,24 +108,19 @@ class GeminiEvaluator:
             )
             result = EvaluationResult.model_validate_json(text)
             validate_result(context.checklist, context.conversation, result)
-            usage = payload.get("usageMetadata", {})
-            input_tokens = usage.get("promptTokenCount")
-            answer_tokens = usage.get("candidatesTokenCount")
-            thought_tokens = usage.get("thoughtsTokenCount", 0)
-            output_tokens = (
-                answer_tokens + thought_tokens if isinstance(answer_tokens, int) else None
-            )
         except (
             KeyError,
             IndexError,
+            AttributeError,
             TypeError,
             ValueError,
             ValidationError,
             InvalidEvaluationResult,
         ):
-            raise DomainError(
+            raise EvaluatorFailure(
                 "AI_INVALID_RESULT",
                 "Gemini returned an invalid assessment or transcript citation",
+                usage,
             ) from None
         return EvaluatorOutput(
             result=result,
@@ -111,4 +130,5 @@ class GeminiEvaluator:
             output_tokens=output_tokens,
             calls=1,
             audio_analyzed=False,
+            usage=usage,
         )

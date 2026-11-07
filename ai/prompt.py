@@ -4,7 +4,7 @@ import json
 
 from backend.evaluator import EvaluationContext
 
-PROMPT_VERSION = "cqa-gemini-v1"
+PROMPT_VERSION = "cqa-gemini-v2"
 
 
 def response_schema(criterion_ids: list[str]) -> dict[str, object]:
@@ -70,6 +70,21 @@ def response_schema(criterion_ids: list[str]) -> dict[str, object]:
 def build_prompt(context: EvaluationContext) -> str:
     conversation = context.conversation
     checklist = context.checklist
+    criteria = []
+    for criterion in checklist.criteria:
+        item: dict[str, object] = {
+            "id": criterion.id,
+            "name": criterion.name,
+            "type": criterion.type,
+            "rule": criterion.rule,
+        }
+        if criterion.allow_na:
+            item["na_rule"] = criterion.na_rule
+        if criterion.type == "scale":
+            item["scale"] = criterion.scale
+        if conversation.channel == "voice call" and criterion.call_rule:
+            item["call_rule"] = criterion.call_rule
+        criteria.append(item)
     task = {
         "language": conversation.language,
         "channel": conversation.channel,
@@ -82,7 +97,12 @@ def build_prompt(context: EvaluationContext) -> str:
             }
             for message in conversation.transcript
         ],
-        "checklist": checklist.model_dump(include={"name", "version", "global_rules", "criteria"}),
+        "checklist": {
+            "name": checklist.name,
+            "version": checklist.version,
+            "global_rules": checklist.global_rules,
+            "criteria": criteria,
+        },
     }
     return (
         "Оцени только работу оператора по переданному чек-листу. "

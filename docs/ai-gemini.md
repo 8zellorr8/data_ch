@@ -30,7 +30,8 @@
 
 Первые 30 чатов — пилот. Сверяйте спорные случаи с чек-листом и вторым участником команды. Затем можно подготовить остальные чаты в отдельной папке (`--per-language 20 --out ...`) и разметить их. Сохраните часть размеченных примеров для независимой проверки; команда `build` автоматически откладывает каждый пятый чат каждого языка.
 
-После заполнения черновиков:
+После заполнения и проверки каждого черновика человеком установите
+`"annotation_status": "reviewed"`, затем выполните:
 
 ```powershell
 .\.venv\Scripts\python.exe -m ai.labels build
@@ -38,14 +39,51 @@
 
 Скрипт проверит формат, значения и точные цитаты. Только при полной валидности он создаст `data/labels/sft/train.jsonl` и `validation.jsonl` в формате conversational prompt/completion для [TRL SFTTrainer](https://huggingface.co/docs/trl/sft_trainer). Эти файлы тоже содержат тексты диалогов и не должны попадать в Git или публичный Hugging Face Hub.
 
+В этой рабочей копии есть отдельные 15 предварительно размеченных чатов в
+`data/labels/seed-drafts/`. Они имеют `annotation_status: "provisional"` и не являются
+экспертным эталоном. Для пробного локального обучения их можно собрать явно:
+
+```powershell
+.\.venv\Scripts\python.exe -m ai.labels build --drafts data/labels/seed-drafts --out data/labels/seed-sft --allow-provisional
+```
+
+Получится 12 примеров для обучения и 3 для проверки. Для оценки качества
+потребуется независимая экспертная проверка меток и более широкий набор.
+
 ## 3. Экспериментальное локальное обучение LoRA
 
 Gemini доступен через API и не является базовой моделью для этого скрипта. Для LoRA используется открытая `Qwen/Qwen3-0.6B` по умолчанию; можно указать другую совместимую Qwen3 модель. Скрипт повторяет порядок из [PEFT Quicktour](https://huggingface.co/docs/peft/quicktour): загрузить базовую модель, задать `LoraConfig`, обернуть через `get_peft_model`, обучить и сохранить только адаптер. Данные не загружаются на Hub. Это отдельный опытный путь; обученный адаптер пока не подключён к backend.
 
-Установите `torch` с поддержкой вашей CUDA по [инструкции PyTorch](https://pytorch.org/get-started/locally/), затем `datasets`, `transformers`, `accelerate`, `peft`, `trl` в отдельное окружение. После ручной разметки и `build`:
+Создайте **отдельное** окружение для обучения: новые библиотеки ML не должны менять
+зависимости рабочего backend. Например, с `uv`:
 
 ```powershell
-python -m ai.train_lora
+uv venv --python 3.12 .venv-train
+uv pip install --python .venv-train\Scripts\python.exe -e .
+uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 transformers datasets peft trl accelerate
 ```
 
-Выход: `data/lora/qwen3-cqa/adapter/`. Скрипт требует CUDA и останавливается, если пример будет обрезан длиной `--max-length`. Он ещё не запускался на реальных метках, поэтому точность и время обучения неизвестны. Сравните LoRA с Gemini на отложенных RU/KZ/EN примерах по каждому критерию, N/A, флагу грубых ошибок и точности цитат, прежде чем менять рабочий evaluator.
+Для CUDA-обучения замените обычную сборку `torch` на вариант по
+[инструкции PyTorch](https://pytorch.org/get-started/locally/). После разметки и `build`:
+
+```powershell
+.\.venv-train\Scripts\python.exe -m ai.train_lora
+```
+
+Выход: `data/lora/qwen3-cqa/adapter/`. Скрипт использует CUDA, если она доступна;
+`--device cpu` позволяет технически проверить обучение без неё, но работает медленнее.
+Скрипт останавливается,
+если пример будет обрезан длиной `--max-length`. Для пробного набора укажите
+`--train data/labels/seed-sft/train.jsonl --validation data/labels/seed-sft/validation.jsonl`.
+Адаптер и манифест обучения сохраняются локально в выбранном `--output`.
+Проверка трёх отложенных чатов:
+
+```powershell
+.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/seed-qwen3/adapter --validation data/labels/seed-sft/validation.jsonl --drafts data/labels/seed-drafts --output data/lora/seed-evaluation.json
+```
+
+Отчёт показывает, сколько ответов прошло проверку формата и цитат, совпадения по
+критериям и ошибку итогового балла. Поскольку метки предварительные и выборка мала,
+это техническая проверка обучения, а не доказательство качества для хакатона.
+Сравните LoRA с Gemini на отложенных RU/KZ/EN примерах по каждому критерию,
+N/A, флагу грубых ошибок и точности цитат, прежде чем менять рабочий evaluator.

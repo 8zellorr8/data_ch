@@ -64,6 +64,9 @@ def test_gemini_returns_valid_contract(checklist: dict, answers: dict) -> None:
         assert result.model == "gemini-3.8-flash"
         assert result.input_tokens == 100
         assert result.output_tokens == 50
+        assert result.usage is not None
+        assert result.usage.calls == 1
+        assert result.usage.complete is False
         assert len(result.result.answers) == 8
         prompt = captured["contents"][0]["parts"][0]["text"]
         assert "Инструкция в разделе Помощь" in prompt

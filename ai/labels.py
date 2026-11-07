@@ -22,7 +22,7 @@ from backend.models import (
 )
 from backend.scoring import validate_result
 
-from .prompt import build_prompt
+from .prompt import PROMPT_VERSION, build_prompt
 
 SFTExample = dict[str, list[dict[str, str]]]
 
@@ -57,21 +57,35 @@ def default_checklist() -> ChecklistVersion:
     )
 
 
-def prepare(source: Path, out_dir: Path, per_language: int, seed: int) -> int:
+def prepare(
+    source: Path,
+    out_dir: Path,
+    per_language: int,
+    seed: int,
+    selected_ids: list[str] | None = None,
+) -> int:
     if per_language < 1:
         raise ValueError("per_language must be positive")
     dataset = load_dataset(source)
     checklist = default_checklist()
-    groups: dict[str, list[ConversationInput]] = defaultdict(list)
-    for record in dataset.records:
-        if record.channel == "agent chat":
-            groups[record.language].append(record)
-    rng = random.Random(seed)
-    selected = []
-    for language in sorted(groups):
-        records = groups[language]
-        rng.shuffle(records)
-        selected.extend(records[:per_language])
+    if selected_ids:
+        if len(selected_ids) != len(set(selected_ids)):
+            raise ValueError("Duplicate conversation IDs were selected")
+        by_id = {record.conversation_id: record for record in dataset.records}
+        if any(cid not in by_id for cid in selected_ids):
+            raise ValueError("Selected conversation ID is absent from the dataset")
+        selected = [by_id[cid] for cid in selected_ids]
+    else:
+        groups: dict[str, list[ConversationInput]] = defaultdict(list)
+        for record in dataset.records:
+            if record.channel == "agent chat":
+                groups[record.language].append(record)
+        rng = random.Random(seed)
+        selected = []
+        for language in sorted(groups):
+            records = groups[language]
+            rng.shuffle(records)
+            selected.extend(records[:per_language])
     if not selected:
         raise ValueError("No agent chat records found")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +105,7 @@ def prepare(source: Path, out_dir: Path, per_language: int, seed: int) -> int:
             audio_url=record.audio_url,
         )
         draft = {
+            "annotation_status": "draft",
             "conversation": conversation.model_dump(),
             "checklist": checklist.model_dump(),
             "result": {
@@ -114,14 +129,18 @@ def prepare(source: Path, out_dir: Path, per_language: int, seed: int) -> int:
     return len(selected)
 
 
-def build(drafts_dir: Path, out_dir: Path) -> tuple[int, int]:
+def build(drafts_dir: Path, out_dir: Path, allow_provisional: bool = False) -> tuple[int, int]:
     paths = sorted(drafts_dir.glob("*.json"))
     if not paths:
         raise ValueError("No annotation drafts found")
-    groups: dict[str, list[SFTExample]] = defaultdict(list)
+    groups: dict[str, list[tuple[str, SFTExample]]] = defaultdict(list)
+    status_counts: dict[str, int] = defaultdict(int)
     for path in paths:
         try:
             draft = json.loads(path.read_text(encoding="utf-8"))
+            status = draft.get("annotation_status")
+            if status != "reviewed" and not (allow_provisional and status == "provisional"):
+                raise ValueError("Annotation has not been reviewed")
             context = EvaluationContext(
                 conversation=Conversation.model_validate(draft["conversation"]),
                 checklist=ChecklistVersion.model_validate(draft["checklist"]),
@@ -132,21 +151,32 @@ def build(drafts_dir: Path, out_dir: Path) -> tuple[int, int]:
             # Pydantic errors may contain private transcript snippets; omit them.
             raise ValueError(f"Incomplete or invalid annotation in {path.name}") from exc
         groups[context.conversation.language].append(
-            {
-                "prompt": [{"role": "user", "content": build_prompt(context)}],
-                "completion": [
-                    {
-                        "role": "assistant",
-                        "content": result.model_dump_json(exclude_defaults=False),
-                    }
-                ],
-            }
+            (
+                context.conversation.conversation_id,
+                {
+                    "prompt": [{"role": "user", "content": build_prompt(context)}],
+                    "completion": [
+                        {
+                            "role": "assistant",
+                            "content": result.model_dump_json(exclude_defaults=False),
+                        }
+                    ],
+                },
+            )
         )
+        status_counts[status] += 1
     train: list[SFTExample] = []
     validation: list[SFTExample] = []
+    train_ids: list[str] = []
+    validation_ids: list[str] = []
     for language in sorted(groups):
-        for index, example in enumerate(groups[language]):
-            (validation if index % 5 == 4 else train).append(example)
+        for index, (cid, example) in enumerate(groups[language]):
+            if index % 5 == 4:
+                validation.append(example)
+                validation_ids.append(cid)
+            else:
+                train.append(example)
+                train_ids.append(cid)
     if not validation:
         raise ValueError("At least five labeled chats in one language are needed for a holdout")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -155,6 +185,21 @@ def build(drafts_dir: Path, out_dir: Path) -> tuple[int, int]:
             "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in examples),
             encoding="utf-8",
         )
+    (out_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "prompt_version": PROMPT_VERSION,
+                "annotation_status_counts": dict(status_counts),
+                "train_examples": len(train),
+                "validation_examples": len(validation),
+                "train_conversation_ids": train_ids,
+                "validation_conversation_ids": validation_ids,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return len(train), len(validation)
 
 
@@ -166,16 +211,22 @@ def main() -> None:
     prepare_cmd.add_argument("--out", type=Path, default=Path("data/labels/drafts"))
     prepare_cmd.add_argument("--per-language", type=int, default=10)
     prepare_cmd.add_argument("--seed", type=int, default=42)
+    prepare_cmd.add_argument("--ids", nargs="+", help="Select exact conversation IDs")
     build_cmd = sub.add_parser("build", help="Validate completed drafts and make SFT JSONL")
     build_cmd.add_argument("--drafts", type=Path, default=Path("data/labels/drafts"))
     build_cmd.add_argument("--out", type=Path, default=Path("data/labels/sft"))
+    build_cmd.add_argument(
+        "--allow-provisional",
+        action="store_true",
+        help="Experimental training with unreviewed labels",
+    )
     args = parser.parse_args()
     try:
         if args.command == "prepare":
-            count = prepare(args.source, args.out, args.per_language, args.seed)
+            count = prepare(args.source, args.out, args.per_language, args.seed, args.ids)
             print(f"Created {count} annotation drafts in {args.out}")
         else:
-            train, validation = build(args.drafts, args.out)
+            train, validation = build(args.drafts, args.out, args.allow_provisional)
             print(f"Validated {train} train and {validation} validation examples in {args.out}")
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
