@@ -43,7 +43,11 @@ def create_app(
     evaluation_service = EvaluationService(repository, evaluator, settings.evaluation_timeout)
     owner = str(uuid4())
     coordinator = EvaluationCoordinator(
-        evaluation_service, work_store, owner, AdmissionLimit(settings.ai_concurrency)
+        evaluation_service,
+        work_store,
+        owner,
+        AdmissionLimit(settings.ai_concurrency),
+        settings.batch_rate_retries,
     )
     batches = BatchService(coordinator, work_store, settings.batch_queue_limit)
     runtime = ExecutionRuntime(batches, work_store, owner, settings.owner_lease_seconds)
@@ -87,7 +91,7 @@ def create_app(
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Idempotency-Key", "X-Request-ID"],
-        expose_headers=["X-Request-ID", "X-Execution-ID"],
+        expose_headers=["X-Request-ID", "X-Execution-ID", "Retry-After"],
     )
     app.add_middleware(RequestDiagnosticsMiddleware)
     install_error_handlers(app)

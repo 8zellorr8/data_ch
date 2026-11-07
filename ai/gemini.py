@@ -3,17 +3,26 @@
 import asyncio
 import math
 import re
+from time import time
 
 import httpx
 from pydantic import ValidationError
 
 from backend.errors import DomainError, InvalidEvaluationResult
-from backend.evaluator import EvaluationContext, EvaluatorFailure, EvaluatorOutput
+from backend.evaluator import (
+    EvaluationContext,
+    EvaluatorFailure,
+    EvaluatorOutput,
+    ProviderDeferred,
+    RequestGate,
+)
 from backend.models import EvaluationResult
+from backend.rate_limits import RequestLimiter
 from backend.scoring import validate_result
 from backend.work_models import ProviderUsage
 
 from .prompt import PROMPT_VERSION, build_prompt, response_schema
+from .rate_errors import retry_hint
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_FALLBACK_MODEL = "gemini-3.6-flash"
@@ -36,6 +45,7 @@ class GeminiEvaluator:
         client: httpx.AsyncClient | None = None,
         timeout: float = 15,
         fallback_timeout: float = 40,
+        request_gate: RequestGate | None = None,
     ) -> None:
         if thinking_level not in {"low", "medium", "high"}:
             raise ValueError("thinking_level must be low, medium or high")
@@ -54,6 +64,7 @@ class GeminiEvaluator:
         self._client = client
         self.timeout = timeout
         self.fallback_timeout = fallback_timeout
+        self._request_gate = request_gate if request_gate is not None else RequestLimiter()
 
     async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
         if not self.configured:
@@ -96,6 +107,15 @@ class GeminiEvaluator:
                 complete=False,
             )
             try:
+                await self._request_gate.wait(model)
+            except ProviderDeferred as exc:
+                # A local cooldown has made no new network call. Earlier attempts
+                # may be ambiguous, so do not enable automatic batch replay then.
+                exc.provider_not_called = calls == 1
+                exc.safe_to_retry = calls == 1
+                exc.usage = usage.model_copy(update={"calls": calls - 1}) if calls > 1 else None
+                raise
+            try:
                 async with asyncio.timeout(timeout):
                     if self._client is None:
                         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
@@ -114,8 +134,19 @@ class GeminiEvaluator:
                 raise EvaluatorFailure(
                     "AI_UNAVAILABLE", "Could not reach Gemini API", usage
                 ) from None
+            if response.status_code == 429:
+                retry_at, exhausted = retry_hint(response, time())
+                await self._request_gate.defer(model, retry_at, exhausted)
+                # Never burn the remaining attempts immediately, or silently
+                # switch model when a known quota refusal should pause the queue.
+                raise ProviderDeferred(
+                    retry_at,
+                    quota_exhausted=exhausted,
+                    usage=usage,
+                    safe_to_retry=calls == 1,
+                )
             if response.status_code != 200:
-                if response.status_code in {429, 503} and calls < len(models):
+                if response.status_code == 503 and calls < len(models):
                     continue
                 # Never expose the response body or API key to users or logs.
                 raise EvaluatorFailure(

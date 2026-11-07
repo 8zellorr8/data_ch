@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from .async_utils import durable_thread, finish_task
 from .errors import DomainError
-from .evaluator import EvaluatorFailure
+from .evaluator import EvaluatorFailure, ProviderDeferred
 from .idempotency import request_fingerprint
 from .models import EvaluationRecord, EvaluationRequest, ManualEvaluationRequest
 from .observability import execution_id_context
@@ -46,8 +46,10 @@ class EvaluationCoordinator:
         store: ExecutionStore,
         owner: str,
         limit: AdmissionLimit,
+        rate_retries: int = 3,
     ) -> None:
         self.service, self.store, self.owner, self.limit = service, store, owner, limit
+        self.rate_retries = rate_retries
 
     async def evaluate(
         self,
@@ -133,8 +135,18 @@ class EvaluationCoordinator:
                 if interrupted:
                     code = "EVALUATION_INTERRUPTED"
                 try:
+                    deferred = exc if isinstance(exc, ProviderDeferred) else None
+                    retry_at = deferred.retry_at if deferred and deferred.safe_to_retry else None
                     await durable_thread(
-                        self.store.fail, reservation.id, code, elapsed(), usage, interrupted
+                        self.store.fail,
+                        reservation.id,
+                        deferred.batch_error_code if retry_at is not None and deferred else code,
+                        elapsed(),
+                        usage,
+                        interrupted,
+                        retry_at=retry_at,
+                        max_retries=self.rate_retries,
+                        provider_not_called=deferred.provider_not_called if deferred else False,
                     )
                 except DomainError:
                     # The failed audit write is visible in logs; the lease will

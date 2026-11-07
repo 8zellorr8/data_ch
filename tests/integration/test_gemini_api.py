@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from ai.gemini import GeminiEvaluator
 from backend.main import create_app
+from backend.rate_limits import RequestLimiter
 
 
 @pytest.mark.parametrize(
@@ -70,6 +71,7 @@ def test_custom_rubric_single_replay_and_batch(settings, dataset, language, chan
         "test-key",
         model="gemini-3.6-flash",
         allow_voice_calls=True,
+        request_gate=RequestLimiter(requests_per_minute=60000),
         client=httpx.AsyncClient(transport=transport),
     )
     dataset["records"][0].update(language=language, channel=channel)

@@ -1,6 +1,8 @@
 """HTTP-only error presentation and bounded ASGI request buffering."""
 
 import logging
+from math import ceil
+from time import time
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,6 +11,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .errors import DomainError, ErrorCode
+from .evaluator import ProviderDeferred
 from .models import Contract
 from .observability import error_code_context
 
@@ -131,7 +134,10 @@ class UnexpectedErrorMiddleware:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
-        return error_response(exc.code, exc.message, ERROR_HTTP_STATUS[exc.code])
+        response = error_response(exc.code, exc.message, ERROR_HTTP_STATUS[exc.code])
+        if isinstance(exc, ProviderDeferred):
+            response.headers["Retry-After"] = str(max(1, ceil(exc.retry_at - time())))
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

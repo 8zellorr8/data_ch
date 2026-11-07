@@ -1,6 +1,7 @@
 """Durable execution bookkeeping composed with the existing SQLite repository."""
 
 import sqlite3
+from time import time
 from uuid import uuid4
 
 from .clock import utc_now
@@ -173,9 +174,14 @@ class WorkStore:
                 (record.id, execution_id),
             )
             conn.execute(
-                """UPDATE batch_items SET status='succeeded', evaluation_id=? WHERE id=
+                """UPDATE batch_items SET status='succeeded', error_code=NULL, evaluation_id=? WHERE id=
                    (SELECT item_id FROM evaluation_executions WHERE id=?)""",
                 (record.id, execution_id),
+            )
+            conn.execute(
+                "UPDATE batch_retry_state SET retry_at=NULL WHERE item_id="
+                "(SELECT item_id FROM evaluation_executions WHERE id=?)",
+                (execution_id,),
             )
         return record
 
@@ -186,25 +192,55 @@ class WorkStore:
         duration_ms: int,
         usage: ProviderUsage | None,
         interrupted: bool = False,
+        *,
+        retry_at: float | None = None,
+        max_retries: int = 0,
+        provider_not_called: bool = False,
     ) -> None:
         status = "interrupted" if interrupted else "failed"
         with self.repository.connection(write=True) as conn:
-            conn.execute(
-                """UPDATE evaluation_executions SET status=?,error_code=?,duration_ms=?,usage=?
+            changed = conn.execute(
+                """UPDATE evaluation_executions SET status=?,error_code=?,duration_ms=?,usage=?,
+                   provider_not_called=?
                    WHERE id=? AND status='running'""",
                 (
                     status,
                     code,
                     duration_ms,
                     usage.model_dump_json() if usage else None,
+                    int(provider_not_called),
                     execution_id,
                 ),
             )
-            conn.execute(
-                """UPDATE batch_items SET status=?,error_code=? WHERE status='running' AND id=
-                   (SELECT item_id FROM evaluation_executions WHERE id=?)""",
-                (status, code, execution_id),
-            )
+            if changed.rowcount == 1:
+                item = conn.execute(
+                    """SELECT i.id FROM batch_items i
+                       JOIN evaluation_executions e ON e.item_id=i.id
+                       JOIN execution_owners o ON o.id=i.owner_id
+                       WHERE e.id=? AND i.status='running' AND i.owner_id=e.owner_id
+                       AND o.expires_at>?""",
+                    (execution_id, time()),
+                ).fetchone()
+                item_status = status
+                if retry_at is not None and not interrupted and item:
+                    conn.execute(
+                        """INSERT INTO batch_retry_state(item_id,retry_at,retry_count) VALUES (?,?,?)
+                           ON CONFLICT(item_id) DO UPDATE SET retry_at=excluded.retry_at,
+                           retry_count=retry_count+excluded.retry_count""",
+                        (item["id"], retry_at, int(not provider_not_called)),
+                    )
+                    count = conn.execute(
+                        "SELECT retry_count FROM batch_retry_state WHERE item_id=?", (item["id"],)
+                    ).fetchone()[0]
+                    if count <= max_retries:
+                        item_status = "pending"
+                conn.execute(
+                    """UPDATE batch_items SET status=?,error_code=?,owner_id=NULL
+                       WHERE status='running' AND id=
+                       (SELECT item_id FROM evaluation_executions WHERE id=?)
+                       AND owner_id=(SELECT owner_id FROM evaluation_executions WHERE id=?)""",
+                    (item_status, code, execution_id, execution_id),
+                )
             if usage is not None:
                 # A lease may have expired while the provider was responding.
                 # Keep known usage without reviving the interrupted operation.
@@ -319,11 +355,27 @@ class WorkStore:
         ).fetchone()
         if not row:
             raise DomainError("NOT_FOUND", "Batch not found")
+        # Closed backups made before this additive feature remain readable.
+        has_retries = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='batch_retry_state'"
+            ).fetchone()
+            is not None
+        )
+        retry_fields = (
+            "r.retry_at,COALESCE(r.retry_count,0) AS rate_limit_retries"
+            if has_retries
+            else "NULL AS retry_at,0 AS rate_limit_retries"
+        )
+        retry_join = " LEFT JOIN batch_retry_state r ON r.item_id=i.id" if has_retries else ""
         items = [
             BatchItem.model_validate(dict(r))
             for r in conn.execute(
-                "SELECT id,conversation_id,status,evaluation_id,error_code FROM batch_items "
-                "WHERE batch_id=? ORDER BY ordinal",
+                "SELECT i.id,i.conversation_id,i.status,i.evaluation_id,i.error_code,"
+                + retry_fields
+                + " FROM batch_items i"
+                + retry_join
+                + " WHERE i.batch_id=? ORDER BY i.ordinal",
                 (batch_id,),
             )
         ]
@@ -335,6 +387,32 @@ class WorkStore:
 
     def get_batch(self, batch_id: str) -> BatchRecord:
         with self.repository.connection() as conn:
+            return self._batch(conn, batch_id)
+
+    def resume_batch(self, batch_id: str, queue_limit: int) -> BatchRecord:
+        with self.repository.connection(write=True) as conn:
+            batch = self._batch(conn, batch_id)
+            ids = [
+                i.id
+                for i in batch.items
+                if i.status == "failed"
+                and i.evaluation_id is None
+                and i.error_code in {"AI_RATE_LIMITED", "AI_QUOTA_EXHAUSTED"}
+            ]
+            queued = conn.execute(
+                "SELECT COUNT(*) FROM batch_items WHERE status IN ('pending','running')"
+            ).fetchone()[0]
+            if ids and queued + len(ids) > queue_limit:
+                raise DomainError("BATCH_QUEUE_FULL", "Too many unfinished batch items")
+            # The write lock also serializes claim/cancel/concurrent resume requests.
+            for item_id in ids:
+                conn.execute(
+                    "UPDATE batch_items SET status='pending',owner_id=NULL WHERE id=?", (item_id,)
+                )
+                # A deliberate resume grants a new retry budget, never bypasses cooldown.
+                conn.execute(
+                    "UPDATE batch_retry_state SET retry_count=0 WHERE item_id=?", (item_id,)
+                )
             return self._batch(conn, batch_id)
 
     def cancel_pending(self, batch_id: str) -> BatchRecord:
@@ -358,7 +436,10 @@ class WorkStore:
             row = conn.execute(
                 """SELECT i.id,i.batch_id,i.conversation_id,b.checklist_id,b.checklist_version
                 FROM batch_items i JOIN evaluation_batches b ON b.id=i.batch_id
-                WHERE i.status='pending' ORDER BY b.created_at,b.id,i.ordinal LIMIT 1"""
+                LEFT JOIN batch_retry_state r ON r.item_id=i.id
+                WHERE i.status='pending' AND (r.retry_at IS NULL OR r.retry_at<=?)
+                ORDER BY b.created_at,b.id,i.ordinal LIMIT 1""",
+                (now,),
             ).fetchone()
             if not row:
                 return None
@@ -401,7 +482,7 @@ class WorkStore:
                 clause, params = f"{column} IN ({','.join('?' for _ in ids)})", ids
             rows = conn.execute(
                 "SELECT e.id,e.evaluation_id,e.conversation_id,e.status,e.error_code,"
-                "e.duration_ms,e.usage,i.batch_id FROM evaluation_executions e "
+                "e.duration_ms,e.usage,e.provider_not_called,i.batch_id FROM evaluation_executions e "
                 "LEFT JOIN batch_items i ON i.id=e.item_id WHERE "
                 + clause
                 + " AND e.scope='ai' ORDER BY e.created_at,e.id",

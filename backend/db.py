@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .clock import utc_now
 from .errors import DomainError
+from .migrations import migrate_attempts
 from .models import (
     AppealRecord,
     ChecklistDefinition,
@@ -72,9 +73,12 @@ class Repository:
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
         with self.connection(transaction=False) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
+            conn.executescript(schema)
+        with self.connection(write=True) as conn:
+            migrate_attempts(conn, schema)
         default = ChecklistDefinition.model_validate_json(
             Path(__file__).with_name("default_checklist.json").read_text(encoding="utf-8")
         )

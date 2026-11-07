@@ -230,6 +230,11 @@ def report_quality(payload: ComparisonManifest, services: Services) -> QualityRe
     return services.quality.generate(payload)
 
 
+@router.post("/api/v1/evaluation-batches/{batch_id}/resume", tags=["batches"])
+async def resume_batch(batch_id: str, services: Services) -> BatchRecord:
+    return await services.batches.resume(batch_id)
+
+
 @router.post("/api/v1/datasets/{dataset_id}/submission", tags=["export"])
 def submission(
     dataset_id: str, payload: SubmissionRequest, services: Services

@@ -35,11 +35,23 @@ CREATE TABLE IF NOT EXISTS evaluation_executions(
     id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES execution_owners(id),
     scope TEXT NOT NULL, key_hash TEXT, fingerprint TEXT NOT NULL,
     conversation_id TEXT NOT NULL REFERENCES conversations(id),
-    item_id TEXT UNIQUE REFERENCES batch_items(id),
+    item_id TEXT REFERENCES batch_items(id),
     status TEXT NOT NULL CHECK(status IN ('running','succeeded','failed','interrupted')),
     evaluation_id TEXT REFERENCES evaluations(id), response TEXT,
     error_code TEXT, duration_ms INTEGER, usage TEXT,
-    created_at TEXT NOT NULL, UNIQUE(scope, key_hash)
+    created_at TEXT NOT NULL, provider_not_called INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(scope, key_hash)
 );
 CREATE INDEX IF NOT EXISTS execution_owner_status ON evaluation_executions(owner_id, status);
 CREATE INDEX IF NOT EXISTS execution_evaluation ON evaluation_executions(evaluation_id);
+CREATE INDEX IF NOT EXISTS execution_batch_item ON evaluation_executions(item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_item_execution ON evaluation_executions(item_id)
+WHERE status IN ('running','succeeded');
+CREATE TABLE IF NOT EXISTS batch_retry_state(
+    item_id TEXT PRIMARY KEY REFERENCES batch_items(id),
+    retry_at REAL, retry_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS provider_limits(
+    model TEXT PRIMARY KEY, next_at REAL NOT NULL DEFAULT 0,
+    blocked_until REAL NOT NULL DEFAULT 0, quota INTEGER NOT NULL DEFAULT 0
+);

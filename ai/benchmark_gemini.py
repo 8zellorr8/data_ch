@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from backend.errors import DomainError
 from backend.evaluator import EvaluationContext
 from backend.models import ChecklistVersion, Conversation, EvaluationResult
+from backend.rate_limits import RequestLimiter
 from backend.scoring import calculate, validate_result
 
 from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, GeminiEvaluator
@@ -41,6 +42,7 @@ async def benchmark(args: argparse.Namespace) -> dict[str, object]:
         thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", "low"),
         timeout=float(os.getenv("CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS", "15")),
         fallback_timeout=float(os.getenv("CQA_GEMINI_FALLBACK_TIMEOUT_SECONDS", "40")),
+        request_gate=RequestLimiter(requests_per_minute=float(os.getenv("CQA_GEMINI_RPM", "3"))),
     )
     compared: dict[str, int] = defaultdict(int)
     matches: dict[str, int] = defaultdict(int)

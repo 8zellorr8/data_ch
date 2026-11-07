@@ -1,6 +1,7 @@
 """Integration boundary owned by the AI teammate. No fake runtime evaluations."""
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Protocol
 
 from .errors import DomainError, ErrorCode
@@ -38,6 +39,43 @@ class Evaluator(Protocol):
     configured: bool
 
     async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput: ...
+
+
+class ProviderDeferred(EvaluatorFailure):
+    """Known refusal/cooldown, distinct from an ambiguous network interruption."""
+
+    def __init__(
+        self,
+        retry_at: float,
+        *,
+        quota_exhausted: bool = False,
+        usage: ProviderUsage | None = None,
+        provider_not_called: bool = False,
+        safe_to_retry: bool = True,
+    ) -> None:
+        if not isfinite(retry_at) or retry_at < 0:
+            raise ValueError("Retry time must be finite and nonnegative")
+        # Keep the existing HTTP error contract for upstream failures.
+        super().__init__(
+            "AI_UNAVAILABLE",
+            "AI daily quota exhausted; retry after cooldown"
+            if quota_exhausted
+            else "AI rate limited; retry after cooldown",
+            usage,
+        )
+        self.retry_at = retry_at
+        self.quota_exhausted = quota_exhausted
+        self.provider_not_called = provider_not_called
+        self.safe_to_retry = safe_to_retry
+
+    @property
+    def batch_error_code(self) -> str:
+        return "AI_QUOTA_EXHAUSTED" if self.quota_exhausted else "AI_RATE_LIMITED"
+
+
+class RequestGate(Protocol):
+    async def wait(self, model: str) -> None: ...
+    async def defer(self, model: str, retry_at: float, quota_exhausted: bool) -> None: ...
 
 
 class UnconfiguredEvaluator:

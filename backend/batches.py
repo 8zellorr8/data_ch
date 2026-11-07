@@ -7,6 +7,7 @@ from time import time
 
 from .async_utils import durable_thread
 from .errors import DomainError
+from .evaluator import ProviderDeferred
 from .execution import EvaluationCoordinator
 from .models import Page
 from .ports import BatchStore, OwnerStore
@@ -22,6 +23,7 @@ class BatchService:
         self.coordinator, self.store, self.queue_limit = coordinator, store, queue_limit
         self.wake = asyncio.Event()
         self._stopping = False
+        self._retry_at = 0.0
 
     def stop(self) -> None:
         # Cancellation can race with a completed wait; never rely on it alone
@@ -48,16 +50,26 @@ class BatchService:
     def cancel(self, batch_id: str) -> BatchRecord:
         return self.store.cancel_pending(batch_id)
 
+    async def resume(self, batch_id: str) -> BatchRecord:
+        result = await durable_thread(self.store.resume_batch, batch_id, self.queue_limit)
+        self.wake.set()
+        return result
+
     async def consume(self) -> None:
         while not self._stopping:
             self.wake.clear()
             try:
-                if self.coordinator.service.evaluator.configured:
+                if self.coordinator.service.evaluator.configured and time() >= self._retry_at:
                     item = await durable_thread(self.store.claim, self.coordinator.owner, time())
                     if item:
                         try:
                             await self.coordinator.evaluate(item.request, item_id=item.id)
                         except DomainError as exc:
+                            if isinstance(exc, ProviderDeferred):
+                                # The attempt and deferred item were committed together.
+                                # Stop draining other items into the same provider cooldown.
+                                self._retry_at = exc.retry_at
+                                continue
                             await durable_thread(
                                 self.store.finish_item,
                                 item.id,

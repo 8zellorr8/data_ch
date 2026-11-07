@@ -35,6 +35,7 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 | GET | `/api/v1/evaluation-batches/{id}` | Пакет, completed, статусы и ID оценок по каждому элементу |
 | POST | `/api/v1/reports/usage` | Один из evaluation_ids / execution_ids / batch_id → отчёт известного расхода |
 | POST | `/api/v1/evaluation-batches/{id}/cancel` | Без тела → текущий BatchRecord; отменяются только pending |
+| POST | `/api/v1/evaluation-batches/{id}/resume` | Без тела → текущий BatchRecord; только failed с известным отказом 429, без повторной оценки succeeded |
 | POST | `/api/v1/reports/quality` | Явные пары reference_id/reference_revision/ai_id → QualityReport, без вызова модели |
 
 Без подключённого адаптера `/health` возвращает ai_configured=false, новые запросы

@@ -73,10 +73,15 @@ class ExecutionStore(Protocol):
         duration_ms: int,
         usage: ProviderUsage | None,
         interrupted: bool = False,
+        *,
+        retry_at: float | None = None,
+        max_retries: int = 0,
+        provider_not_called: bool = False,
     ) -> None: ...
 
 
 class BatchStore(Protocol):
+    def resume_batch(self, batch_id: str, queue_limit: int) -> BatchRecord: ...
     def cancel_pending(self, batch_id: str) -> BatchRecord: ...
     def replay_batch(self, request: BatchRequest, key_hash: str) -> BatchRecord | None: ...
     def create_batch(

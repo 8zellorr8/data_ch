@@ -10,8 +10,18 @@ from fastapi.testclient import TestClient
 from ai.app import create_hosted_app
 from ai.gemini import GeminiEvaluator
 from backend.errors import DomainError
-from backend.evaluator import EvaluationContext
+from backend.evaluator import EvaluationContext, ProviderDeferred
 from backend.models import ChecklistVersion, Conversation, Message
+from backend.rate_limits import RequestLimiter
+
+
+@pytest.fixture(autouse=True)
+def fast_requests(monkeypatch):
+    # Provider contract fixtures should not spend wall time testing pacing.
+    # Separate limiter tests use a deterministic clock and real SQLite locking.
+    monkeypatch.setattr(
+        "ai.gemini.RequestLimiter", lambda: RequestLimiter(requests_per_minute=60000)
+    )
 
 
 def make_context(checklist: dict) -> EvaluationContext:
@@ -322,5 +332,100 @@ def test_permanent_error_is_not_retried_or_leaked(checklist: dict, status: int) 
         assert "test-key" not in str(caught.value)
         assert "secret-provider-body" not in str(caught.value)
         assert len(requests) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("daily", [False, True])
+def test_429_pauses_without_retry_or_fallback_and_does_not_leak(checklist, daily):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "600"},
+            json={
+                "error": {
+                    "message": "test-key secret provider message",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [{"quotaId": "PerDay" if daily else "PerMinute"}],
+                        }
+                    ],
+                }
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            evaluator = GeminiEvaluator("test-key", client=client)
+            with pytest.raises(ProviderDeferred) as first:
+                await evaluator.evaluate(make_context(checklist))
+            assert first.value.usage.calls == 1
+            assert first.value.quota_exhausted is daily
+            assert first.value.safe_to_retry and not first.value.provider_not_called
+            with pytest.raises(ProviderDeferred) as second:
+                await evaluator.evaluate(make_context(checklist))
+            assert second.value.provider_not_called and second.value.usage is None
+            assert first.value.retry_at == second.value.retry_at
+            assert "test-key" not in str(first.value) and "secret" not in str(first.value)
+        assert len(calls) == 1
+
+    asyncio.run(run())
+
+
+def test_quota_after_ambiguous_attempt_is_not_automatically_replayed(checklist):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("ambiguous")
+        return httpx.Response(429, headers={"Retry-After": "600"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with pytest.raises(ProviderDeferred) as caught:
+                await GeminiEvaluator("test-key", client=client).evaluate(make_context(checklist))
+            assert not caught.value.safe_to_retry
+            assert caught.value.usage.calls == 2
+            assert not caught.value.provider_not_called
+
+    asyncio.run(run())
+
+
+def test_every_attempt_including_fallback_passes_request_gate(checklist, answers):
+    models = []
+    calls = []
+
+    class RecordingGate:
+        async def wait(self, model):
+            models.append(model)
+
+        async def defer(self, *args):
+            raise AssertionError("No 429 in this fixture")
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) < 3:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(answers)}]}}
+                ]
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            result = await GeminiEvaluator(
+                "test-key", client=client, request_gate=RecordingGate()
+            ).evaluate(make_context(checklist))
+        assert result.calls == 3
+        assert models == ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.6-flash"]
 
     asyncio.run(run())

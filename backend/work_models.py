@@ -55,6 +55,10 @@ class BatchItem(Contract):
     status: WorkStatus
     evaluation_id: str | None = None
     error_code: str | None = None
+    retry_at: float | None = Field(
+        default=None, ge=0, description="Earliest retry, Unix UTC seconds"
+    )
+    rate_limit_retries: int = Field(default=0, ge=0)
 
 
 class BatchRecord(Contract):

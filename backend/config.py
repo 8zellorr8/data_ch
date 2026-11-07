@@ -43,10 +43,19 @@ class Settings:
     batch_queue_limit: int = field(
         default_factory=lambda: int(os.getenv("CQA_BATCH_QUEUE_LIMIT", "1000"))
     )
+    batch_rate_retries: int = field(
+        default_factory=lambda: int(os.getenv("CQA_BATCH_RATE_RETRIES", "3"))
+    )
     owner_lease_seconds: float = 30
     tariffs: tuple[Tariff, ...] = field(default_factory=load_tariffs)
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.batch_rate_retries, bool)
+            or not isinstance(self.batch_rate_retries, int)
+            or not 0 <= self.batch_rate_retries <= 10
+        ):
+            raise ValueError("Batch rate-limit retries must be between 0 and 10")
         for count in (self.ai_concurrency, self.batch_queue_limit):
             if isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 raise ValueError("Concurrency and queue limits must be positive integers")
