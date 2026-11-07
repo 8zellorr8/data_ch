@@ -10,6 +10,8 @@ import pytest
 
 from backend.domain import new_evaluation
 from backend.models import AIModelMetadata, DatasetImport, EvaluationResult, ManualMetadata
+from backend.submission import SubmissionRequest
+from backend.submission_remote import download, endpoint
 from backend.work_models import BatchRequest
 
 
@@ -94,6 +96,13 @@ def test_api_and_cli_match_appendix_and_keep_old_export(
     response = submit(client, submission_data)
     assert response.status_code == 200, response.text
     doc = response.json()
+    remote = download(
+        client,
+        endpoint("http://localhost", dataset_id),
+        SubmissionRequest.model_validate(payload),
+        timeout=5,
+    )
+    assert remote.model_dump(mode="json") == doc
     assert doc["schema_version"] == "1.0"
     assert len(doc["results"]) == 10
     row = doc["results"][0]

@@ -53,6 +53,48 @@ async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
 
 Рекомендуемая будущая структура: `ai/adapter.py`, `ai/app.py`, `ai/prompts/`. В `ai/app.py` создать `app = create_app(evaluator=YourEvaluator(...))` и запускать `python -m uvicorn ai.app:app --env-file .env`. После добавления пакета `ai` включить его в `tool.setuptools.packages.find` и зафиксировать новые зависимости. Backend-участник согласует этот небольшой интеграционный коммит.
 
+### Hosted-приложение: frontend и API на одном адресе
+
+`create_hosted_app(*, evaluator: Evaluator | None = None)` передаёт адаптер в тот же
+`create_app`. Один экземпляр используется одиночными запросами и обработчиком
+пакетов. Статика, проверка локального SQLite, резервные копии и завершение
+фоновых задач остаются в hosted-обёртке. Вызов без аргументов совместим:
+
+```text
+python -m uvicorn backend.hosting:create_hosted_app --factory
+```
+
+После реализации адаптера AI-участник добавляет свою фабрику, например в
+`ai/app.py` (имена ниже — пример будущего кода, такого модуля сейчас нет):
+
+```python
+from backend.hosting import create_hosted_app
+from ai.adapter import build_evaluator
+
+
+def create_app():
+    # build_evaluator принадлежит AI-участнику и читает его серверную конфигурацию.
+    return create_hosted_app(evaluator=build_evaluator())
+```
+
+Для alwaysdata меняется только цель существующей команды:
+
+```text
+/home/replimetr/venv/bin/python -m uvicorn ai.app:create_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
+```
+
+Сохранить все `CQA_*` настройки из [alwaysdata.md](alwaysdata.md). Добавить
+`ai*` к `tool.setuptools.packages.find.include`, включить файлы промптов в
+package-data при их использовании и проверить установленный пакет из чистого
+окружения. Новые зависимости клиента объявить в pyproject и зафиксировать в
+requirements-lock.txt. Имена переменных для ключа/модели определяет готовый
+адаптер; добавление одного ключа сейчас ничего не подключает.
+
+Если адаптер владеет HTTP-клиентом, AI-участник должен определить его закрытие
+в lifespan своей фабрики, сохранив вложенный lifespan hosted-приложения.
+Текущий Protocol не добавляет неявных вызовов `close()` стороннему объекту.
+Проверки synthetic Evaluator подтверждают передачу зависимости, но не работу Gemini.
+
 Интерфейс допускает как локальный Ollama, так и облачный сервис. Конкретная модель
 и клиент провайдера остаются внутри адаптера; backend не привязан к его HTTP API.
 
