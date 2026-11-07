@@ -1,14 +1,16 @@
 """One bounded batch consumer per app; durable claims allow multiple consumers."""
 
 import asyncio
+import hashlib
 import logging
 from time import time
 
 from .async_utils import durable_thread
 from .errors import DomainError
 from .execution import EvaluationCoordinator
+from .models import Page
 from .ports import BatchStore, OwnerStore
-from .work_models import BatchRecord, BatchRequest
+from .work_models import BatchRecord, BatchRequest, BatchSummary
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +22,21 @@ class BatchService:
         self.coordinator, self.store, self.queue_limit = coordinator, store, queue_limit
         self.wake = asyncio.Event()
 
-    async def create(self, request: BatchRequest) -> BatchRecord:
+    async def create(self, request: BatchRequest, key: str | None = None) -> BatchRecord:
+        key_hash = hashlib.sha256(key.encode()).hexdigest() if key else None
+        if key_hash:
+            replay = await asyncio.to_thread(self.store.replay_batch, request, key_hash)
+            if replay is not None:
+                # Reading a previous acceptance must work even if AI was disabled.
+                return replay
         if not self.coordinator.service.evaluator.configured:
             raise DomainError("AI_NOT_CONFIGURED", "AI is not connected yet")
-        result = await durable_thread(self.store.create_batch, request, self.queue_limit)
+        result = await durable_thread(self.store.create_batch, request, self.queue_limit, key_hash)
         self.wake.set()
         return result
+
+    def list(self, limit: int = 20, offset: int = 0) -> Page[BatchSummary]:
+        return self.store.list_batches(limit, offset)
 
     async def consume(self) -> None:
         while True:

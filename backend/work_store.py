@@ -6,11 +6,13 @@ from uuid import uuid4
 from .clock import utc_now
 from .db import Repository
 from .errors import DomainError, ErrorCode
-from .models import AIModelMetadata, EvaluationRecord, EvaluationRequest
+from .idempotency import request_fingerprint
+from .models import AIModelMetadata, EvaluationRecord, EvaluationRequest, Page
 from .work_models import (
     BatchItem,
     BatchRecord,
     BatchRequest,
+    BatchSummary,
     ClaimedItem,
     ProviderUsage,
     Reservation,
@@ -212,9 +214,40 @@ class WorkStore:
                     (usage.model_dump_json(), duration_ms, execution_id),
                 )
 
-    def create_batch(self, request: BatchRequest, queue_limit: int) -> BatchRecord:
+    @staticmethod
+    def _replay_batch(
+        conn: sqlite3.Connection,
+        request: BatchRequest,
+        key_hash: str,
+    ) -> BatchRecord | None:
+        row = conn.execute(
+            "SELECT fingerprint,response FROM batch_creation_requests WHERE key_hash=?",
+            (key_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["fingerprint"] != request_fingerprint(request):
+            raise DomainError("IDEMPOTENCY_CONFLICT", "Key was used with a different batch request")
+        return BatchRecord.model_validate_json(row["response"])
+
+    def replay_batch(self, request: BatchRequest, key_hash: str) -> BatchRecord | None:
+        with self.repository.connection() as conn:
+            return self._replay_batch(conn, request, key_hash)
+
+    def create_batch(
+        self,
+        request: BatchRequest,
+        queue_limit: int,
+        key_hash: str | None = None,
+    ) -> BatchRecord:
         batch_id = str(uuid4())
         with self.repository.connection(write=True) as conn:
+            if key_hash:
+                # Recheck under the same write lock as creation: the fast read in
+                # BatchService is insufficient for concurrent requests/processes.
+                replay = self._replay_batch(conn, request, key_hash)
+                if replay is not None:
+                    return replay
             queued = conn.execute(
                 "SELECT COUNT(*) FROM batch_items WHERE status IN ('pending','running')"
             ).fetchone()[0]
@@ -244,7 +277,39 @@ class WorkStore:
                     for i, cid in enumerate(request.conversation_ids)
                 ],
             )
-            return self._batch(conn, batch_id)
+            result = self._batch(conn, batch_id)
+            if key_hash:
+                conn.execute(
+                    "INSERT INTO batch_creation_requests (key_hash,fingerprint,batch_id,response) "
+                    "VALUES (?,?,?,?)",
+                    (key_hash, request_fingerprint(request), batch_id, result.model_dump_json()),
+                )
+            return result
+
+    def list_batches(self, limit: int = 20, offset: int = 0) -> Page[BatchSummary]:
+        with self.repository.connection() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM evaluation_batches").fetchone()[0]
+            # Aggregate only the selected page, not every item of every old batch.
+            rows = conn.execute(
+                """SELECT b.id,b.created_at,b.checklist_id,b.checklist_version,
+                    COUNT(i.id) AS total,
+                    SUM(CASE WHEN i.status='pending' THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN i.status='running' THEN 1 ELSE 0 END) AS running,
+                    SUM(CASE WHEN i.status='succeeded' THEN 1 ELSE 0 END) AS succeeded,
+                    SUM(CASE WHEN i.status='failed' THEN 1 ELSE 0 END) AS failed,
+                    SUM(CASE WHEN i.status='interrupted' THEN 1 ELSE 0 END) AS interrupted
+                FROM (SELECT id,created_at,checklist_id,checklist_version FROM evaluation_batches
+                      ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?) b
+                LEFT JOIN batch_items i ON i.batch_id=b.id
+                GROUP BY b.id,b.created_at,b.checklist_id,b.checklist_version
+                ORDER BY b.created_at DESC,b.id DESC""",
+                (limit, offset),
+            ).fetchall()
+            items = [
+                BatchSummary(**dict(row), completed=row["pending"] + row["running"] == 0)
+                for row in rows
+            ]
+            return Page(items=items, total=total, limit=limit, offset=offset)
 
     @staticmethod
     def _batch(conn: sqlite3.Connection, batch_id: str) -> BatchRecord:

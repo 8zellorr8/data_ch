@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import json
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,6 +13,7 @@ from pydantic import ValidationError
 from .async_utils import durable_thread, finish_task
 from .errors import DomainError
 from .evaluator import EvaluatorFailure
+from .idempotency import request_fingerprint
 from .models import EvaluationRecord, EvaluationRequest, ManualEvaluationRequest
 from .observability import execution_id_context
 from .ports import ExecutionStore
@@ -37,17 +37,6 @@ class AdmissionLimit:
             yield
         finally:
             self._slots.release()
-
-
-def request_fingerprint(request: EvaluationRequest) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            request.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode()
-    ).hexdigest()
 
 
 class EvaluationCoordinator:

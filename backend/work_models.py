@@ -66,6 +66,20 @@ class BatchRecord(Contract):
     items: list[BatchItem]
 
 
+class BatchSummary(Contract):
+    id: str
+    created_at: str
+    checklist_id: str
+    checklist_version: int
+    completed: bool
+    total: int
+    pending: int
+    running: int
+    succeeded: int
+    failed: int
+    interrupted: int
+
+
 class ClaimedItem(Contract):
     id: str
     batch_id: str

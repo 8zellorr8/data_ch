@@ -34,7 +34,14 @@ from .models import (
 from .reports import usage_report
 from .services import AppealService, EvaluationService, ImportService
 from .value_types import Channel, Language
-from .work_models import BatchRecord, BatchRequest, Tariff, UsageReport, UsageSelection
+from .work_models import (
+    BatchRecord,
+    BatchRequest,
+    BatchSummary,
+    Tariff,
+    UsageReport,
+    UsageSelection,
+)
 from .work_store import WorkStore
 
 
@@ -182,8 +189,21 @@ def export(dataset_id: str, services: Services) -> DatasetExport:
 
 
 @router.post("/api/v1/evaluation-batches", status_code=201, tags=["batches"])
-async def create_batch(payload: BatchRequest, services: Services) -> BatchRecord:
-    return await services.batches.create(payload)
+async def create_batch(
+    payload: BatchRequest,
+    services: Services,
+    idempotency_key: IdempotencyKey = None,
+) -> BatchRecord:
+    return await services.batches.create(payload, idempotency_key)
+
+
+@router.get("/api/v1/evaluation-batches", tags=["batches"])
+def list_batches(
+    services: Services,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+) -> Page[BatchSummary]:
+    return services.batches.list(limit, offset)
 
 
 @router.get("/api/v1/evaluation-batches/{batch_id}", tags=["batches"])

@@ -10,8 +10,16 @@ from .models import (
     DatasetSummary,
     EvaluationRecord,
     OrganizerImport,
+    Page,
 )
-from .work_models import BatchRecord, BatchRequest, ClaimedItem, ProviderUsage, Reservation
+from .work_models import (
+    BatchRecord,
+    BatchRequest,
+    BatchSummary,
+    ClaimedItem,
+    ProviderUsage,
+    Reservation,
+)
 
 
 class EvaluationStore(Protocol):
@@ -69,7 +77,14 @@ class ExecutionStore(Protocol):
 
 
 class BatchStore(Protocol):
-    def create_batch(self, request: BatchRequest, queue_limit: int) -> BatchRecord: ...
+    def replay_batch(self, request: BatchRequest, key_hash: str) -> BatchRecord | None: ...
+    def create_batch(
+        self,
+        request: BatchRequest,
+        queue_limit: int,
+        key_hash: str | None = None,
+    ) -> BatchRecord: ...
+    def list_batches(self, limit: int = 20, offset: int = 0) -> Page[BatchSummary]: ...
     def claim(self, owner: str, now: float) -> ClaimedItem | None: ...
     def finish_item(
         self, item_id: str, owner: str, code: str, *, retry_busy: bool = False

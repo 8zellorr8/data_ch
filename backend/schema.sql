@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS evaluation_batches(
     checklist_version INTEGER NOT NULL,
     FOREIGN KEY(checklist_id, checklist_version) REFERENCES checklist_versions(checklist_id, version)
 );
+CREATE INDEX IF NOT EXISTS batches_created ON evaluation_batches(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS batch_creation_requests(
+    key_hash TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+    batch_id TEXT NOT NULL UNIQUE REFERENCES evaluation_batches(id), response TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS batch_items(
     id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES evaluation_batches(id),
     conversation_id TEXT NOT NULL REFERENCES conversations(id), ordinal INTEGER NOT NULL,

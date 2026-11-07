@@ -30,7 +30,8 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 | POST | `/api/v1/evaluations/{id}/appeals` | `{criterion_id, comment, author}` → апелляция, 201 |
 | POST | `/api/v1/appeals/{id}/decision` | Решение → обновлённая полная оценка |
 | GET | `/api/v1/datasets/{id}/export` | `{schema_version, exported_at, dataset, conversations, evaluations}` |
-| POST | `/api/v1/evaluation-batches` | `{conversation_ids, checklist_id, checklist_version}` → пакет, 201 |
+| POST | `/api/v1/evaluation-batches` | `{conversation_ids, checklist_id, checklist_version}` + необязательный Idempotency-Key → пакет, 201 |
+| GET | `/api/v1/evaluation-batches` | `{items,total,limit,offset}`; сводки и счётчики статусов, limit 1–100 (20 по умолчанию), offset от 0 |
 | GET | `/api/v1/evaluation-batches/{id}` | Пакет, completed, статусы и ID оценок по каждому элементу |
 | POST | `/api/v1/reports/usage` | Один из evaluation_ids / execution_ids / batch_id → отчёт известного расхода |
 
