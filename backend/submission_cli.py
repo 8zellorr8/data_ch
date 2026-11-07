@@ -3,58 +3,15 @@
 import argparse
 import json
 import os
-import tempfile
 from pathlib import Path
-from typing import Any
 
 from pydantic import ValidationError
 
 from .db import Repository
 from .errors import DomainError
 from .submission import SubmissionRequest, SubmissionService
+from .submission_files import publish, read_json
 from .work_store import WorkStore
-
-
-def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("Duplicate JSON key")
-        result[key] = value
-    return result
-
-
-def reject_constant(value: str) -> None:
-    raise ValueError("Non-finite JSON number")
-
-
-def read_json(path: Path) -> Any:
-    if path.stat().st_size > 16 * 1024 * 1024:
-        raise ValueError("JSON exceeds 16 MiB")
-    return json.loads(
-        path.read_text(encoding="utf-8"),
-        object_pairs_hook=unique_object,
-        parse_constant=reject_constant,
-    )
-
-
-def publish(path: Path, text: str, overwrite: bool) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write((text + "\n").encode("utf-8"))
-            stream.flush()
-            os.fsync(stream.fileno())
-        if overwrite:
-            os.replace(temporary, path)
-        else:
-            # Atomic publication without a check-then-write overwrite race.
-            os.link(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:

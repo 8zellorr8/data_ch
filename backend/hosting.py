@@ -16,6 +16,7 @@ from starlette.staticfiles import StaticFiles
 
 from .backup import BackupError, create_backup, manifest_path
 from .config import Settings
+from .evaluator import Evaluator
 from .main import create_app
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class HostedSnapshots:
                 raise
 
 
-def create_hosted_app() -> FastAPI:
+def create_hosted_app(*, evaluator: Evaluator | None = None) -> FastAPI:
     settings = Settings()
     frontend = Path(os.environ["CQA_FRONTEND_PATH"]).resolve(strict=True)
     if not frontend.is_dir() or not (frontend / "index.html").is_file():
@@ -106,7 +107,7 @@ def create_hosted_app() -> FastAPI:
             backup_path,
             int(os.getenv("CQA_BACKUP_INTERVAL_SECONDS", "21600")),
         )
-    app = create_app(settings)
+    app = create_app(settings, evaluator=evaluator)
     base_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
