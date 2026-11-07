@@ -1,0 +1,60 @@
+/* Batch evaluation uses the existing Ketnavr surfaces and semantic statuses. */
+.batch-dialog { display: grid; gap: 20px; min-width: 0; }
+.batch-dialog > p { margin: 0; }
+.batch-dialog .field { font-size: 13px; }
+.batch-counts { display: flex; flex-wrap: wrap; gap: 12px 24px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.batch-counts span { display: grid; gap: 4px; }
+.batch-counts strong { font: 20px var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.batch-progress { display: block; width: 100%; height: 8px; accent-color: var(--primary); border: 0; border-radius: 4px; overflow: hidden; background: var(--raised); }
+.batch-progress::-webkit-progress-bar { background: var(--raised); }
+.batch-progress::-webkit-progress-value { background: var(--primary); }
+.batch-progress::-moz-progress-bar { background: var(--primary); }
+.batch-task-list { list-style: none; padding: 0; margin: 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.batch-task-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 16px; }
+.batch-task-list li + li { border-top: 1px solid var(--border); }
+.batch-task-id { min-width: 0; overflow-wrap: anywhere; font: 13px/1.5 var(--mono); }
+.batch-task-id small { display: block; margin-top: 4px; font: 12px/1.5 "Segoe UI", Arial, sans-serif; color: var(--muted); }
+.batch-task-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.batch-message { font-size: 13px; }
+.batch-recovery { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.batch-recovery > p { font-size: 12px; }
+.batch-recovery-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 12px 0; border-top: 1px solid var(--border); }
+.batch-recovery-row > div { min-width: 0; overflow-wrap: anywhere; }
+.batch-recovery-row strong { display: block; font: 13px var(--mono); }
+.batch-recovery-row span { display: block; font-size: 12px; margin-top: 4px; }
+.batch-recovery-row p { font-size: 12px; margin: 8px 0 0; }
+.batch-recovery-row .button { flex-shrink: 0; }
+.batch-footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+.batch-footer p { margin: 0 auto 0 0; font-size: 12px; max-width: 420px; }
+.batch-recovery { margin-bottom: 20px; }
+.batch-recovery h2 { font-size: 18px; margin-bottom: 12px; }
+.batch-table { min-width: 680px; }
+.batch-table th, .batch-table td { vertical-align: top; }
+.batch-record-id { display: block; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.5 var(--mono); margin-top: 8px; }
+.batch-detail { display: grid; gap: 20px; }
+.batch-detail > p, .batch-detail h2 { margin: 0; }
+.batch-detail .section-heading { margin-bottom: 0; flex-wrap: wrap; }
+.batch-results { max-height: none; }
+.batch-results .batch-task-status { flex-wrap: wrap; justify-content: flex-end; }
+.batch-detail .toolbar { flex-wrap: wrap; }
+.back-link { display: inline-block; margin-bottom: 16px; }
+@media (max-width:600px) {
+  .batch-dialog { gap: 16px; }
+  .batch-task-list li, .batch-recovery-row { flex-wrap: wrap; gap: 8px; }
+  .batch-task-id, .batch-recovery-row > div { flex-basis: 100%; }
+  .batch-footer { flex-wrap: wrap; }
+  .batch-footer p { max-width: none; flex-basis: 100%; }
+  .batch-footer .button { flex: 1; }
+}
+
+.batch-update-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 16px; }
+.batch-update-controls span { color: var(--muted); font-size: .8125rem; line-height: 1.5; max-width: 65ch; }
+.batch-detail .batch-update-controls { margin-bottom: 0; }
+.batch-task-list { overscroll-behavior: contain; }
+.batch-scroll-hint { color: var(--muted); font-size: .8125rem; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.batch-table th, .batch-table td { text-align: start; font-family: inherit; }
+.batch-table strong { font-variant-numeric: tabular-nums; }
+.batch-detail > .muted { max-width: 72ch; line-height: 1.55; }
+.batch-task-list .button { white-space: normal; }
+.batch-record-id { user-select: text; }
+@media (min-width: 1100px) { .batch-scroll-hint { display: none; } }

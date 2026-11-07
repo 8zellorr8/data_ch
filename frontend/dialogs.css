@@ -1,0 +1,72 @@
+.dialog-filters { display: grid; gap: 16px; padding: 20px; }
+.dialog-filter-main { display: grid; grid-template-columns: minmax(180px,1.6fr) minmax(180px,1fr); gap: 16px; }
+.dialog-filter-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+.dialog-filters .field { gap: 6px; margin: 0; min-width: 0; }
+.dialog-filters .field > span { color: var(--muted); font-size: .8125rem; }
+.dialog-filters .search-field { display: block; min-width: 0; max-width: none; width: 100%; margin: 0; }
+.dialog-search .search-field input { min-height: 40px; font-size: .875rem; }
+.dialog-search .search-field svg { top: 12px; pointer-events: none; }
+.dialog-filters select { width: 100%; }
+.dialog-filter-options { min-width: 0; }
+.dialog-filter-options summary { width: fit-content; max-width: 100%; min-height: 32px; cursor: pointer; font-size: .8125rem; line-height: 1.5; overflow-wrap: anywhere; }
+.dialog-filter-options[open] summary { margin-bottom: 8px; }
+.dialog-filter-context { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: .75rem; }
+.dataset-group { font-size: .75rem; overflow-wrap: anywhere; }
+#selection-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--raised); }
+#selection-bar:not(.has-selection) { background: var(--surface); }
+.selection-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.selection-summary .muted { font-size: 12px; }
+.selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.selection-help { flex-basis: 100%; margin: 0; font-size: .75rem; }
+.dialog-scroll-hint { margin: 0; padding: 8px 20px; color: var(--muted); background: var(--surface); font-size: .75rem; line-height: 1.5; }
+.dialog-table-scroll { overscroll-behavior-inline: contain; scroll-padding-inline: 8px; }
+.dialog-table-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.dialog-table td:nth-child(4), .dialog-table th:nth-child(4) { text-align: start; }
+.dialog-table td:nth-child(5), .dialog-table th:nth-child(5) { text-align: end; font-variant-numeric: tabular-nums; }
+.dialog-table .conversation-link { text-decoration: underline; text-underline-offset: .2em; text-decoration-color: var(--border); }
+.batch-pending-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding-top: 12px; border-top: 1px solid var(--border); }
+.dialog-table .selection-cell { padding: 0 4px; width: 44px; }
+.dialog-table { min-width: 780px; }
+.dialog-table td.id-cell { min-width: 160px; }
+.row-select { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; cursor: pointer; }
+.dialog-table tr.is-selected { background: #f0f6f2; }
+.result-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.result-tags:empty { display: none; }
+.import-modes { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0 0 20px; border: 0; }
+.import-modes legend { margin-bottom: 8px; }
+.import-modes label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.import-modes label:has(input:checked) { border-color: var(--primary); background: #f0f6f2; }
+.import-help { margin: 0; color: var(--muted); }
+@media (min-width: 1200px) {
+  .dialog-filters { grid-template-columns: minmax(0,2.6fr) minmax(0,2.7fr); align-items: start; }
+  .dialog-filter-main { grid-template-columns: minmax(0,1.4fr) minmax(0,1.2fr); align-items: start; }
+  .dialog-filter-fields { grid-template-columns: minmax(90px,.7fr) minmax(110px,.8fr) minmax(170px,1.2fr); align-items: start; }
+  .dialog-filter-options summary { display: none; }
+  .dialog-filter-context { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .dialog-filters { padding: 16px; gap: 12px; }
+  .dialog-filter-main { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .dialog-filter-fields { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .dialog-filter-options summary { padding-block: 8px; min-height: 44px; }
+  .dialog-search .search-field input, .dialog-filters select { font-size: 1rem; min-height: 44px; }
+  .dialog-search .search-field svg { top: 14px; }
+  .dialog-filter-context { align-items: start; }
+  .dialogs-page .dataset-toolbar { flex-wrap: wrap; }
+  .dialogs-page .dataset-field { flex-basis: 100%; }
+  .dialogs-page .dataset-toolbar > .button { width: auto; font-size: .8125rem; margin-inline-start: auto; min-height: 40px; }
+  .dialogs-page .stats-strip { gap: 16px 0; margin-bottom: 20px; padding-bottom: 20px; }
+  .dialogs-page .stat { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; gap: 4px 8px; }
+  .dialogs-page .stat-head { font-size: .75rem; }
+  .dialogs-page .stat-value { margin: 0; font-size: 1.375rem; }
+  .dialogs-page .stat-caption { display: none; }
+  .dialogs-page .stat:first-child .stat-caption { display: block; grid-column: 1/-1; margin: 0; font-size: .75rem; }
+  #selection-bar { padding-inline: 16px; }
+  .dialog-scroll-hint { padding-inline: 16px; }
+  .selection-actions { width: 100%; }
+  .selection-actions .button { min-height: 44px; flex-grow: 1; white-space: normal; }
+  #selection-bar:not(.has-selection) .selection-summary { font-size: .8125rem; }
+  #selection-bar:not(.has-selection) .selection-actions { width: auto; flex: 1; }
+  #selection-bar:not(.has-selection) .selection-actions .button { min-height: 36px; }
+  .import-modes label { flex: 1; }
+}

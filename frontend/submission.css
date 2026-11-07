@@ -1,0 +1,36 @@
+.submission-page { max-width: 1400px; }
+.submission-page .page-heading p { color: var(--muted); margin: 0; }
+.submission-form h2 { margin-bottom: 0; }
+.submission-form > .panel { min-width: 0; }
+.submission-form .form-grid { align-items: start; }
+.submission-modes { display: flex; flex-wrap: wrap; gap: 12px 24px; border: 0; margin: 0; padding: 0; }
+.submission-modes legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.submission-modes label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
+.submission-model-hint { padding-top: 4px; overflow-wrap: anywhere; }
+.submission-model-hint code { display: inline-block; margin: 4px; }
+.submission-model-hint p { margin: 4px 0 0; }
+.submission-rows { border-top: 1px solid var(--border); }
+.submission-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(220px, 3fr); gap: 12px 24px; padding: 20px 0; align-items: start; border-bottom: 1px solid var(--border); }
+.submission-row > div { min-width: 0; overflow-wrap: anywhere; }
+.submission-row [data-submission-error-field] { grid-column: 2; }
+.submission-row select { width: 100%; }
+.submission-row a[data-submission-eval-link] { font-size: 12px; }
+.submission-download > p { margin: 0; }
+.submission-download > button { justify-self: start; }
+[data-submission-coverage] { display: flex; gap: 8px 24px; flex-wrap: wrap; align-items: baseline; }
+[data-submission-coverage] p { width: 100%; margin: 0; }
+@media (max-width: 640px) {
+  .submission-modes { display: grid; gap: 4px; }
+  .submission-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .submission-row [data-submission-error-field] { grid-column: 1; }
+  .submission-download > button { width: 100%; }
+}
+
+.submission-form > .panel { padding-block: 28px; }
+.submission-form h2 { font-size: 1.125rem; }
+.submission-next { color: var(--muted); font-size: .875rem; line-height: 1.5; max-width: 70ch; }
+.submission-form :is(input,select,textarea)[aria-invalid="true"] { border-color: var(--danger); }
+.submission-model-hint, .submission-download > p { max-width: 72ch; line-height: 1.55; }
+.submission-rows a { text-decoration: underline; text-underline-offset: 3px; }
+.submission-row [data-submission-eval-link] { line-height: 1.5; }
+@media (max-width: 640px) { .submission-form > .panel { padding-block: 20px; } }

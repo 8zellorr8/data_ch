@@ -1,5 +1,7 @@
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const shapes = {
+  menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  chart:'<path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/>',
   chat:'<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"/><path d="M8 10h8M8 14h5"/>',
   phone:'<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.4 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
   list:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
@@ -23,8 +25,30 @@ export function scoreText(value) { return value === null || value === undefined 
 let toastTimer;
 export function toast(message, type='success') {
   const region = document.getElementById('toast-region');
-  region.className = `toast ${type}`; region.innerHTML = `${icon(type === 'error' ? 'alert':'check')}<span>${esc(message)}</span>`;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => {region.className='';region.textContent='';}, 6000);
+  const previousFocus = document.activeElement;
+  clearTimeout(toastTimer);
+  region.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  region.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+  region.className = `toast ${type}`;
+  region.innerHTML = `${icon(type === 'error' ? 'alert':'check')}<span>${esc(message)}</span><button type="button" class="icon-btn toast-dismiss" aria-label="Закрыть уведомление">${icon('close')}</button>`;
+  const dismiss = () => {
+    const returnFocus = region.contains(document.activeElement);
+    clearTimeout(toastTimer); region.className=''; region.replaceChildren();
+    region.onmouseenter = region.onmouseleave = region.onfocusin = region.onfocusout = null;
+    if(returnFocus) (previousFocus?.isConnected && !region.contains(previousFocus) ? previousFocus : document.getElementById('main'))?.focus({preventScroll:true});
+  };
+  region.querySelector('button').onclick = dismiss;
+  // Give success messages a fresh reading interval after pointer or keyboard
+  // attention. Errors remain visible until explicitly dismissed.
+  const scheduleDismiss = () => {
+    clearTimeout(toastTimer);
+    if(type !== 'error') toastTimer = setTimeout(() => {
+      if(!region.matches(':hover') && !region.contains(document.activeElement)) dismiss();
+    },6000);
+  };
+  region.onmouseenter = region.onfocusin = () => clearTimeout(toastTimer);
+  region.onmouseleave = region.onfocusout = scheduleDismiss;
+  scheduleDismiss();
 }
 export function openModal(title, html, {wide=false}={}) {
   const previousFocus = document.activeElement;
@@ -32,11 +56,24 @@ export function openModal(title, html, {wide=false}={}) {
   const titleId = `dialog-${Math.random().toString(36).slice(2)}`;
   el.setAttribute('aria-labelledby', titleId);
   el.innerHTML = `<div class="modal-header"><h2 id="${titleId}">${esc(title)}</h2><button class="icon-btn" type="button" aria-label="Закрыть" data-modal-close>${icon('close')}</button></div><div class="modal-body">${html}</div>`;
-  const close = () => {el.close();el.remove(); if(previousFocus?.isConnected) previousFocus.focus();};
+  const close = () => {
+    el.close();el.remove();
+    if(previousFocus?.isConnected) previousFocus.focus({preventScroll:true});
+    requestAnimationFrame(() => {
+      if(document.activeElement===document.body){
+        const target=previousFocus?.isConnected?previousFocus:document.querySelector('#main h1')||document.getElementById('main');
+        if(target){if(!target.matches('button,a,input,select,textarea'))target.setAttribute('tabindex','-1');target.focus({preventScroll:true});}
+      }
+    });
+  };
   el.querySelector('[data-modal-close]').addEventListener('click', () => {
     if (el.dispatchEvent(new Event('cancel', {cancelable:true}))) close();
   });
-  el.addEventListener('cancel', event => { if(!event.defaultPrevented) queueMicrotask(()=>{if(!event.defaultPrevented) close();}); });
+  // Native events may run a microtask checkpoint between listeners. Wait until
+  // all feature-specific cancel guards have had a chance to prevent closing.
+  el.addEventListener('cancel', event => {
+    setTimeout(() => { if (!event.defaultPrevented && el.isConnected) close(); }, 0);
+  });
   document.body.append(el); el.showModal();
   return {el,body:el.querySelector('.modal-body'),close};
 }

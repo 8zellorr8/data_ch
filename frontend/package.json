@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Replimetr frontend for the existing FastAPI backend. No build or dependencies required.",
   "scripts": {
-    "start": "python -m http.server 5173 --bind 127.0.0.1",
-    "check": "node --check app.js && node --check api.js && node --check ui.js && node --check checklists.js && node --check review.js"
+    "start": "python serve.py",
+    "check": "node --check app.js && node --check api.js && node --check ui.js && node --check checklists.js && node --check review.js && node --check dialogs.js && node --check dialogs-model.js && node --check drafts.js && node --check batch.js && node --check operations.js && node --check reports.js && node --check submission.js",
+    "test": "node --test tests/*.test.js"
   }
 }
