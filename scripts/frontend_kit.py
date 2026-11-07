@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -18,8 +19,8 @@ class DemoFailure(Exception):
     """The integration scenario did not produce the documented result."""
 
 
-def read_scenario():
-    scenario = json.loads(SCENARIO.read_text(encoding="utf-8"))
+def read_scenario() -> dict[str, Any]:
+    scenario: dict[str, Any] = json.loads(SCENARIO.read_text(encoding="utf-8"))
     for step in scenario["steps"]:
         if "body_file" in step:
             step["body"] = json.loads(
@@ -28,7 +29,7 @@ def read_scenario():
     return scenario
 
 
-def resolve(value, variables):
+def resolve(value: Any, variables: dict[str, Any]) -> Any:
     if isinstance(value, str):
         match = VARIABLE.fullmatch(value)
         if match:
@@ -42,14 +43,15 @@ def resolve(value, variables):
     return value
 
 
-def at_path(body, path):
+def at_path(body: Any, path: list[str | int]) -> Any:
     for key in path:
         body = body[key]
     return body
 
 
-def run_scenario(client, scenario):
-    variables, responses = {}, {}
+def run_scenario(client: httpx.Client, scenario: dict[str, Any]) -> dict[str, Any]:
+    variables: dict[str, Any] = {}
+    responses: dict[str, Any] = {}
     for step in scenario["steps"]:
         body = resolve(step["body"], variables) if "body" in step else None
         response = client.request(step["method"], resolve(step["path"], variables), json=body)
@@ -67,10 +69,10 @@ def run_scenario(client, scenario):
     return {"variables": variables, "responses": responses}
 
 
-def collection(scenario):
+def collection(scenario: dict[str, Any]) -> dict[str, Any]:
     items = []
     for step in scenario["steps"]:
-        request = {
+        request: dict[str, Any] = {
             "method": step["method"],
             "url": "{{base_url}}" + step["path"],
             "header": [],
@@ -123,11 +125,11 @@ def collection(scenario):
     }
 
 
-def save_json(path, payload):
+def save_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def export_kit(client, output):
+def export_kit(client: httpx.Client, output: Path) -> int:
     scenario = read_scenario()
     result = run_scenario(client, scenario)
     response = client.get("/openapi.json")
@@ -140,7 +142,7 @@ def export_kit(client, output):
     return len(result["responses"])
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", help="Optional running API origin; creates synthetic demo records")
     parser.add_argument("--output", type=Path, default=ROOT / "data" / "frontend-kit")

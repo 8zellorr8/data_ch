@@ -3,8 +3,10 @@
 Этот сценарий проверяет установку, HTTP API и хранение данных. Gemini, локальная
 модель, ключи AI и ссылка организаторов не нужны. Ручные оценки помечаются
 `origin: "manual"`; синтетические ответы не выдаются за результат настоящей модели.
-Новые HTTP/браузерные проверки после деплоя и результат общего прогона описаны
-в [backend-readiness.md](backend-readiness.md). Раздел «Зафиксированный результат»
+Одной командой можно выполнить изолированную [HTTP-репетицию с перезапуском и
+выгрузкой DEV/PROD](backend-rehearsal.md), не подготавливая `.env` и не запуская
+сервер вручную. [backend-readiness.md](backend-readiness.md) содержит историческую
+HTTP/браузерную проверку. Раздел «Зафиксированный результат»
 ниже относится к прежнему чистому клону и сохраняется как историческая проверка.
 
 ## Подготовка чистого клона
@@ -14,7 +16,7 @@
 Команды выполняются в PowerShell из каталога, где ещё нет `data-ch-check`:
 
 ```powershell
-git clone --single-branch --branch codex/backend-core https://github.com/8zellorr8/data_ch.git data-ch-check
+git clone --single-branch --branch main https://github.com/8zellorr8/data_ch.git data-ch-check
 Set-Location data-ch-check
 python --version
 python -m venv .venv

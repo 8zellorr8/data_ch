@@ -225,6 +225,17 @@ Origin `http://127.0.0.1:5173` уже включён в `.env.example`.
 
 ## Как проверить решение
 
+### Полная техническая репетиция без AI
+
+```text
+python -m scripts.rehearse_backend
+```
+
+Команда сама запускает временный HTTP-сервер, выполняет ручной сценарий,
+проверяет DEV/PROD-выгрузки с явными ошибками отсутствующего AI и сохранность
+данных после перезапуска. Рабочие `.env`, база и results/ не используются.
+Тестовый Evaluator не добавляется. [Этапы, изоляция и ограничения](docs/backend-rehearsal.md).
+
 ### Воспроизводимый сценарий для жюри без AI
 
 После запуска backend в ещё одном терминале выполните из корня репозитория:
@@ -261,7 +272,7 @@ ID и ответы сценария сохраняются в `data/frontend-kit
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m ruff check backend ai scripts tests
 .\.venv\Scripts\python.exe -m ruff format --check backend ai scripts tests
-.\.venv\Scripts\python.exe -m mypy backend ai
+.\.venv\Scripts\python.exe -m mypy backend ai scripts/rehearse_backend.py
 .\.venv\Scripts\python.exe -m scripts.check_secrets
 ```
 
