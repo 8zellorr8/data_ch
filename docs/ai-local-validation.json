@@ -1,0 +1,186 @@
+{
+  "measured_at": "2026-11-07T22:18:21.489635+00:00",
+  "model": "Qwen/Qwen3-1.7B",
+  "method": "QLoRA NF4, rank 8, q_proj/v_proj",
+  "trainable_parameters": 1605632,
+  "gpu": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+  "train_dialogues": 52,
+  "validation_dialogues": 13,
+  "optimizer_steps": 156,
+  "epochs": 3,
+  "train_seconds": 990.4869,
+  "validation_loss_before": 1.8914190530776978,
+  "validation_loss_after": 0.4707523584365845,
+  "peak_gpu_allocated_bytes": 3811556864,
+  "adapter_bytes": 6437272,
+  "reference_status": "provisional; no expert gold or product FAQ",
+  "validation_use": "checkpoint selection; not an independent test set",
+  "timing_note": "Full student set used the full tokenizer alphabet; baseline used the narrowed source+Cyrillic alphabet. All 65 targets and 13 student generations pass the narrowed grammar. Post-optimization student timing was checked on one held-out RU API request, not the full set.",
+  "paid_api_calls_this_run": 0,
+  "paid_api_enabled": false,
+  "paid_usage_limit": 2000000,
+  "reported_prior_spending": 809000,
+  "billing_reconciled": false,
+  "student": {
+    "selected": 13,
+    "valid": 13,
+    "criterion_matches": {
+      "contact": {
+        "matches": 11,
+        "compared": 13
+      },
+      "needs": {
+        "matches": 9,
+        "compared": 13
+      },
+      "identity": {
+        "matches": 11,
+        "compared": 13
+      },
+      "consultation": {
+        "matches": 11,
+        "compared": 13
+      },
+      "empathy": {
+        "matches": 11,
+        "compared": 13
+      },
+      "management": {
+        "matches": 9,
+        "compared": 13
+      },
+      "closing": {
+        "matches": 8,
+        "compared": 13
+      },
+      "gross": {
+        "matches": 12,
+        "compared": 13
+      }
+    },
+    "score_mae_on_valid": 11.785384615384613,
+    "na_counts": {
+      "true_positive": 18,
+      "false_positive": 6,
+      "false_negative": 2
+    },
+    "validated_exact_quotes": 104,
+    "seconds_median": 77.73,
+    "seconds_max": 89.07,
+    "cold_start_seconds": 14.91,
+    "groups": {
+      "language": {
+        "EN": {
+          "valid": 3,
+          "score_mae_on_valid": 18.06
+        },
+        "KZ": {
+          "valid": 3,
+          "score_mae_on_valid": 21.12
+        },
+        "RU": {
+          "valid": 7,
+          "score_mae_on_valid": 5.096
+        }
+      },
+      "channel": {
+        "agent chat": {
+          "valid": 12,
+          "score_mae_on_valid": 12.351
+        },
+        "voice call": {
+          "valid": 1,
+          "score_mae_on_valid": 5.0
+        }
+      }
+    }
+  },
+  "untrained_base_same_schema": {
+    "selected": 13,
+    "valid": 13,
+    "criterion_matches": {
+      "contact": {
+        "matches": 12,
+        "compared": 13
+      },
+      "needs": {
+        "matches": 5,
+        "compared": 13
+      },
+      "identity": {
+        "matches": 10,
+        "compared": 13
+      },
+      "consultation": {
+        "matches": 1,
+        "compared": 13
+      },
+      "empathy": {
+        "matches": 11,
+        "compared": 13
+      },
+      "management": {
+        "matches": 1,
+        "compared": 13
+      },
+      "closing": {
+        "matches": 4,
+        "compared": 13
+      },
+      "gross": {
+        "matches": 12,
+        "compared": 13
+      }
+    },
+    "score_mae_on_valid": 24.61923076923077,
+    "na_counts": {
+      "true_positive": 16,
+      "false_positive": 18,
+      "false_negative": 4
+    },
+    "validated_exact_quotes": 223,
+    "seconds_median": 71.3,
+    "seconds_max": 107.58,
+    "cold_start_seconds": 27.15,
+    "groups": {
+      "language": {
+        "EN": {
+          "valid": 3,
+          "score_mae_on_valid": 14.757
+        },
+        "KZ": {
+          "valid": 3,
+          "score_mae_on_valid": 21.19
+        },
+        "RU": {
+          "valid": 7,
+          "score_mae_on_valid": 30.316
+        }
+      },
+      "channel": {
+        "agent chat": {
+          "valid": 12,
+          "score_mae_on_valid": 20.004
+        },
+        "voice call": {
+          "valid": 1,
+          "score_mae_on_valid": 80.0
+        }
+      }
+    }
+  },
+  "api_smoke": {
+    "status": "passed",
+    "answers": 8,
+    "seconds": 30.52,
+    "model": "local-qwen3-1.7b-cqa-qlora",
+    "paid_api_calls": 0,
+    "saved_and_exported": true,
+    "heldout_api_benchmark": {
+      "conversation_id": "p1-ru-005",
+      "seconds": 28.57,
+      "previous_seconds": 71.17,
+      "same_values": true
+    }
+  }
+}

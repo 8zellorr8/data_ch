@@ -9,9 +9,10 @@ Replimetr — рабочее место эксперта по качеству �
 транскрипты телефонных звонков с языками RU, KZ и EN.
 
 **Состояние текущей ветки:** интерфейс и backend реализованы, доступен полный
-ручной сценарий. Добавлен адаптер Gemini; для запуска автоматической оценки нужен
-`GEMINI_API_KEY` и запуск `ai.app:app`. Backend по умолчанию без ключа возвращает
-`503 AI_NOT_CONFIGURED`. Точность модели пока не измерена.
+ручной сценарий. `ai.app:app` выбирает локальный QLoRA или облачный адаптер через
+`CQA_AI_PROVIDER`. Для локального режима нужны CUDA, базовые веса и адаптер;
+API-ключ не нужен. Инструкция для backend: [ai-local-handoff.md](docs/ai-local-handoff.md).
+Разметка для локального обучения предварительная; экспертная точность не подтверждена.
 
 ## Что реализовано
 
@@ -76,7 +77,7 @@ Replimetr — рабочее место эксперта по качеству �
 | Frontend | HTML, CSS, JavaScript ES Modules, Fetch API; без сборки и npm-зависимостей |
 | Расчёт и резервное копирование | Decimal, sqlite3 backup API и SHA-256 из стандартной библиотеки Python |
 | Контроль качества кода | pytest, Ruff, mypy; GitHub Actions на Python 3.11 и 3.12 |
-| AI | Адаптер Gemini API в `ai/`; runtime по умолчанию использует UnconfiguredEvaluator, запуск `ai.app:app` включает адаптер при наличии ключа |
+| AI | Qwen3-1.7B QLoRA на CUDA и облачные адаптеры в `ai/`; `ai.app:app` выбирает провайдера из `.env`, баллы рассчитывает backend |
 
 Зависимости описаны в [pyproject.toml](pyproject.toml), проверенные версии — в
 [requirements-lock.txt](requirements-lock.txt). Node.js нужен только для
@@ -95,7 +96,7 @@ flowchart LR
     API --> Jobs[Координатор и обработчик пакетов]
     Jobs --> Services
     Services -. автоматическая оценка .-> Adapter[Evaluator]
-    Adapter --> AI[Gemini API]
+    Adapter --> AI[Локальная GPU / настроенный API]
     CLI[Отчёты и резервное копирование] --> DB
 ```
 
@@ -165,8 +166,10 @@ if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --env-file .env --host 127.0.0.1 --port 8000
 ```
 
-Для автоматической оценки впишите ключ в локальный `.env` и запускайте
-`ai.app:app` вместо `backend.main:app`. Инструкция по AI и разметке:
+Для автоматической оценки запускайте `ai.app:app` вместо `backend.main:app`.
+В `.env.example` выбран локальный GPU-режим, платный API отключён.
+Настройка локальной модели: [docs/ai-local-handoff.md](docs/ai-local-handoff.md).
+Инструкция по Gemini и разметке:
 [docs/ai-gemini.md](docs/ai-gemini.md).
 Проверенные бесплатные квоты, качество RU/KZ/EN и настройки для backend:
 [docs/ai-provider-check.md](docs/ai-provider-check.md).

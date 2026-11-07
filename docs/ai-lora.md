@@ -1,14 +1,18 @@
-# Локальное обучение модели оценки чатов
+# Локальное обучение оценки чатов
 
-Для обучения используется `Qwen/Qwen3-0.6B` с PEFT LoRA (`r=8`, `q_proj` и `v_proj`). Обучается 1 146 880 параметров адаптера. Базовые веса остаются замороженными. Порядок соответствует [PEFT Quicktour](https://huggingface.co/docs/peft/quicktour): загрузить базовую модель, создать `LoraConfig`, применить `get_peft_model`, обучить и сохранить адаптер.
+Текущая модель — `Qwen/Qwen3-1.7B`, QLoRA NF4 с PEFT (`r=8`, `alpha=16`, `q_proj` и `v_proj`, dropout 0.05). Обучаются только адаптеры; база заморожена. Порядок соответствует [PEFT Quicktour](https://huggingface.co/docs/peft/quicktour): загрузить базу, создать `LoraConfig`, применить `get_peft_model`, обучить и сохранить адаптер. Новых вызовов платного API для этого запуска нет.
 
-В локальной рабочей копии подготовлены предварительные оценки 60 текстовых чатов из `invoke.json`: 30 RU, 15 KZ и 15 EN. Пять звонков в этот запуск не входят. Все метки имеют `annotation_status: provisional`; их составил ассистент по транскриптам, они не подтверждены экспертами. Продуктовые утверждения без внутреннего справочника помечены для проверки. Четыре отдельно полученных черновика Gemini сохранены в `data/labels/teacher-drafts/` и не подменяют экспертный эталон.
+## Данные
 
-Для видеокарты с 6 ГБ памяти каждый пример содержит весь диалог и один критерий. 48 чатов дают 384 обучающих примера, 12 отложенных чатов — 96 проверочных. Все восемь критериев одного чата попадают в один раздел. Семантически близкие сценарии на разных языках всё ещё могут оказаться в разных разделах: это предварительная техническая проверка, её нельзя считать независимым измерением качества.
+Используются имеющиеся предварительные метки по `invoke.json`: 60 текстовых диалогов (30 RU, 15 KZ, 15 EN) и пять RU-транскриптов звонков. Первый источник — `data/labels/expanded-drafts`, недостающие пять звонков берутся из `data/labels/lite-final-medium`. Первые метки составил ассистент, метки звонков — предыдущий Gemini. Это **не экспертный эталон**. Новая платная разметка aijuju не запрашивается.
+
+Один пример содержит весь диалог и восемь ответов: значения, ID подтверждающих реплик и обоснования. Адаптер извлекает цитаты из исходных сообщений. Это исключает ошибки копирования текста, но не доказывает смысловую уместность выбранной реплики.
+
+Числовые номера сценариев, кратные пяти, отложены: 52 диалога обучают модель, 13 проверяют. Все критерии диалога и совпадающие числовые номера разных языков/каналов находятся в одном разделе. Семантические дубликаты отдельно не проверены. Validation используется для выбора checkpoint, поэтому это предварительная проверка, а не независимый тест.
 
 ## Окружение
 
-ML-зависимости устанавливаются отдельно от рабочего backend:
+Проверено: Windows, RTX 3050 Laptop 6GB, Python 3.12, PyTorch 2.7.1 CUDA 12.6. ML-зависимости отделены от backend:
 
 ```powershell
 uv venv --python 3.12 .venv-train
@@ -17,41 +21,30 @@ uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 --index-url 
 uv pip install --python .venv-train\Scripts\python.exe -r requirements-training.txt
 ```
 
-CUDA-сборка проверена на RTX 3050 6GB Laptop GPU. Для другой платформы выберите сборку по [инструкции PyTorch](https://pytorch.org/get-started/locally/). Базовые веса должны находиться в `data/models/qwen3-0.6b/`; их можно загрузить из [официального репозитория Qwen](https://huggingface.co/Qwen/Qwen3-0.6B). Код не загружает диалоги или адаптер на Hub.
+Для другой платформы выберите CUDA-сборку по [инструкции PyTorch](https://pytorch.org/get-started/locally/). Скачайте базовые файлы из [официального репозитория Qwen](https://huggingface.co/Qwen/Qwen3-1.7B) в `data/models/qwen3-1.7b/`. Код не отправляет диалоги и адаптер на Hub.
 
-## Сборка данных и обучение
-
-После экспертной проверки меток используйте `annotation_status: reviewed`. Для экспериментального запуска с текущими черновиками флаг `--allow-provisional` указан явно:
+## Сборка и обучение
 
 ```powershell
-.\.venv-train\Scripts\python.exe -m ai.labels build --drafts data/labels/expanded-drafts --out data/labels/criterion-sft --per-criterion --allow-provisional
-.\.venv-train\Scripts\python.exe -m ai.train_lora --train data/labels/criterion-sft/train.jsonl --validation data/labels/criterion-sft/validation.jsonl --model data/models/qwen3-0.6b --output data/lora/qwen3-cqa-criterion --device cuda --epochs 1 --max-length 2560 --grad-accum 4
+.\.venv-train\Scripts\python.exe -m ai.compact --drafts data/labels/expanded-drafts data/labels/lite-final-medium --out data/labels/compact-sft
+.\.venv-train\Scripts\python.exe -m ai.train_lora --train data/labels/compact-sft/train.jsonl --validation data/labels/compact-sft/validation.jsonl --model data/models/qwen3-1.7b --output data/lora/qwen3-1.7b-compact --device cuda --load-in-4bit --epochs 3 --max-length 9728 --grad-accum 1
 ```
 
-Максимальная длина текущего примера — 2496 токенов. Скрипт проверяет длину каждого примера и прекращает запуск при обрезании. На GPU включаются BF16, если он поддерживается, TF32 и gradient checkpointing. Память PyTorch ограничена 85% видеопамяти, чтобы при превышении лимита получить явную ошибку вместо длительного вытеснения данных в общую память Windows.
+Максимальная длина текущего примера — 9703 токена. Скрипт прекращает запуск, если пример пришлось бы обрезать. BF16, gradient checkpointing, NF4 и небольшие блоки вычисления loss позволяют вместить самый длинный пример в 6 ГБ. Процесс ограничен 85% памяти GPU. Для PyTorch 2.7 на Windows используется memory-efficient SDPA с явным повторением KV: native GQA иначе выбирает режим с квадратичной памятью. Настройки привязаны к версиям `requirements-training.txt`.
 
-Результат сохраняется в `data/lora/qwen3-cqa-criterion/adapter/`. Манифест рядом содержит параметры, хеши обучающих файлов, список разделённых чатов, число шагов и ошибку до и после обучения. Данные, веса и манифесты находятся под игнорируемой Git папкой `data/`.
+Результат: `data/lora/qwen3-1.7b-compact/adapter/`. Соседний `training-manifest.json` содержит SHA-256 данных, разделение, шаги, параметры и метрики. Нулевой `baseline-adapter/` сохраняется до обучения для сравнения с той же базой. Данные и веса находятся вне Git.
 
-## Проверка генерации и подключение к backend
+## Проверка
 
 ```powershell
-.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-cqa-criterion/adapter --validation data/labels/criterion-sft/validation.jsonl --drafts data/labels/expanded-drafts --output data/lora/qwen3-cqa-criterion/evaluation.json --device cuda
+.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-1.7b-compact/adapter --validation data/labels/compact-sft/validation.jsonl --drafts data/labels/compact-sft/references --output data/lora/qwen3-1.7b-compact/evaluation.json --device cuda --max-new-tokens 2048
+.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-1.7b-compact/baseline-adapter --validation data/labels/compact-sft/validation.jsonl --drafts data/labels/compact-sft/references --output data/lora/qwen3-1.7b-compact/baseline-evaluation.json --device cuda --max-new-tokens 2048
 ```
 
-Отчёт считает успешной только оценку, в которой все восемь ответов соответствуют шкалам и содержат точные цитаты. Отдельный локальный файл `evaluation.generations.json` сохраняет тексты генераций для разбора ошибок; он тоже содержит данные чатов и остаётся вне Git. Снижение функции потерь само по себе не подтверждает правильность оценок.
+Проверка использует настоящий `LocalLoRAEvaluator`: генерация по JSON Schema, восстановление цитат, проверка шкал и расчёт backend. Отчёт включает покрытие, совпадения с черновиками, N/A, MAE и время. Ошибки остаются в знаменателе покрытия. `.generations.json` содержит реальные генерации и остаётся локально.
 
-Экспериментальный `ai.local_lora.LocalLoRAEvaluator` реализует тот же `Evaluator`, что и Gemini. Он формирует ответы по одному критерию, объединяет их и проверяет весь результат через backend. Для локального API:
+Подключение: [ai-local-handoff.md](ai-local-handoff.md).
 
-```powershell
-.\.venv-train\Scripts\python.exe -m uvicorn ai.local_app:app --host 127.0.0.1 --port 8001
-```
+## Предыдущий эксперимент
 
-Swagger: `http://127.0.0.1:8001/docs`, метод оценки — `POST /api/v1/evaluations`. Ключ Gemini для этого запуска не нужен. Настройки: `CQA_LORA_ADAPTER`, `CQA_LORA_DEVICE=auto|cuda|cpu`, `CQA_LORA_BATCH_SIZE=1|2|3|4`. Два ответа генерируются одновременно по умолчанию. Для переноса на другой компьютер нужны адаптер, соседний `training-manifest.json`, базовые веса в том же относительном каталоге и ML-окружение.
-
-Адаптер экспериментальный. Перед выбором его основным evaluator нужны независимая экспертная проверка меток и измерение ошибок на новых диалогах. Рабочий Gemini-адаптер запускается отдельно через `ai.app:app`.
-
-## Результат запуска 7 ноября 2026
-
-На RTX 3050 завершён один проход: 96 шагов оптимизатора, 384 обучающих примера, 15 минут 27 секунд обучения. Ошибка на 96 отложенных примерах снизилась с 1.8341 до 0.3150. Файл `adapter_model.safetensors` занимает 4 602 248 байт.
-
-При свободной генерации только 3 из 12 полных оценок прошли проверку схемы и цитат. На этих трёх средняя ошибка итогового балла против предварительных меток составила 39.91 пункта; остальные девять не включены в эту метрику, поэтому её нельзя трактовать как общую ошибку модели. Адаптер не прошёл проверку для выбора основным оценщиком. Снижение ошибки токенов не означает правильную оценку обслуживания. Текущие веса и подробные отчёты сохранены локально для дальнейших экспериментов.
+7 ноября Qwen3-0.6B обучалась по одному критерию на 384 примерах, 96 шагов за 15 минут 27 секунд. Loss снизился с 1.8341 до 0.3150, но лишь 3 из 12 свободных полных генераций прошли проверку; MAE на этих трёх — 39.91. Эта версия не выбрана для нового запуска. Снижение loss само по себе не подтверждает правильность оценки обслуживания.

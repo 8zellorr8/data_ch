@@ -18,16 +18,28 @@ from backend.evaluator import EvaluationContext
 from backend.models import Conversation, EvaluationResult, Message
 from backend.scoring import validate_result
 
-from .gemini import DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, GeminiEvaluator
+from .config import build_evaluator
+from .gemini import DEFAULT_MODEL
 from .labels import default_checklist, load_dataset
 
 
 async def annotate(args: argparse.Namespace) -> dict[str, object]:
     run_started = time.perf_counter()
     load_dotenv(".env")
-    key = os.getenv("GEMINI_API_KEY", "")
+    provider = os.getenv("CQA_AI_PROVIDER", "gemini")
+    if provider not in {"gemini", "openai-compatible"}:
+        raise ValueError(
+            "autolabel only runs cloud teachers; use evaluate_lora for the local student"
+        )
+    key = os.getenv("CQA_LLM_API_KEY" if provider == "openai-compatible" else "GEMINI_API_KEY", "")
     if not key:
-        raise ValueError("Set GEMINI_API_KEY in the local environment")
+        raise ValueError("Set the selected provider API key in the local environment")
+    if args.model is None:
+        args.model = (
+            os.getenv("CQA_LLM_MODEL", "gemini-3.8-flash")
+            if provider == "openai-compatible"
+            else os.getenv("CQA_GEMINI_MODEL", DEFAULT_MODEL)
+        )
     source = load_dataset(args.source)
     checklist = default_checklist()
 
@@ -50,15 +62,13 @@ async def annotate(args: argparse.Namespace) -> dict[str, object]:
             encoding="utf-8",
         )
 
-    evaluator = GeminiEvaluator(
-        key,
+    evaluator = build_evaluator(
         model=args.model,
-        fallback_model=None,
         allow_voice_calls=args.include_voice,
-        fallback_timeout=40,
         thinking_level=args.thinking_level,
         invalid_result_handler=record_invalid if args.diagnostics_dir is not None else None,
     )
+    args.thinking_level = evaluator.thinking_level
     args.out.mkdir(parents=True, exist_ok=True)
     records = [
         record for record in source.records if record.channel == "agent chat" or args.include_voice
@@ -124,7 +134,7 @@ async def annotate(args: argparse.Namespace) -> dict[str, object]:
             if (
                 existing["conversation"] != conversation.model_dump(mode="json")
                 or existing["checklist"] != checklist.model_dump(mode="json")
-                or existing.get("teacher_model") != args.model
+                or existing.get("requested_model", existing.get("teacher_model")) != args.model
                 or existing.get("prompt_version") != evaluator.prompt_version
                 or existing.get("teacher_thinking_level", "low") != args.thinking_level
             ):
@@ -162,6 +172,7 @@ async def annotate(args: argparse.Namespace) -> dict[str, object]:
             "annotation_status": "provisional",
             "annotation_source": "gemini_teacher_not_human_reviewed",
             "teacher_model": output.model,
+            "requested_model": args.model,
             "teacher_thinking_level": args.thinking_level,
             "prompt_version": output.prompt_version,
             "seconds": round(time.perf_counter() - last_started, 2),
@@ -183,6 +194,7 @@ async def annotate(args: argparse.Namespace) -> dict[str, object]:
         print(f"{index}/{len(records)}: saved {path.name}, {output.calls} call(s)", flush=True)
     return {
         "source": str(args.source),
+        "provider": provider,
         "model": args.model,
         "thinking_level": args.thinking_level,
         "prompt_version": evaluator.prompt_version,
@@ -201,12 +213,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("--out", type=Path, default=Path("data/labels/teacher-drafts"))
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--model")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--ids-file", type=Path, help="JSON array of conversation IDs")
-    parser.add_argument(
-        "--thinking-level", choices=["low", "medium", "high"], default=DEFAULT_THINKING_LEVEL
-    )
+    parser.add_argument("--thinking-level", choices=["low", "medium", "high"])
     parser.add_argument("--include-voice", action="store_true")
     parser.add_argument(
         "--balanced-order", action="store_true", help="Interleave languages and channels"

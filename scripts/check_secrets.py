@@ -8,8 +8,9 @@ from pathlib import Path
 KEY_PATTERNS = (
     re.compile(rb"AQ\.[A-Za-z0-9_-]{30,}"),
     re.compile(rb"AIza[A-Za-z0-9_-]{30,}"),
+    re.compile(rb"rs_client_[A-Za-z0-9_-]{20,}"),
 )
-ASSIGNMENT = re.compile(rb"(?m)^[ \t]*GEMINI_API_KEY[ \t]*=[ \t]*([^\s#]+)")
+ASSIGNMENT = re.compile(rb"(?m)^[ \t]*(?:GEMINI_API_KEY|CQA_LLM_API_KEY)[ \t]*=[ \t]*([^\s#]+)")
 PLACEHOLDERS = {b"...", b"<key>", b"<your-key>", b"YOUR_KEY", b"test-key"}
 ALLOWED_ENV = {".env.example", ".env.docker.example"}
 
