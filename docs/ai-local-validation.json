@@ -182,5 +182,26 @@
       "previous_seconds": 71.17,
       "same_values": true
     }
+  },
+  "follow_up_majority_audit": {
+    "training_dialogues_for_majority": 52,
+    "text_validation_dialogues": 12,
+    "distinct_text_answer_vectors": 1,
+    "same_as_training_majority_cases": 12,
+    "majority_values": {
+      "contact": "yes",
+      "needs": "na",
+      "identity": "na",
+      "consultation": 20,
+      "empathy": "yes",
+      "management": 10,
+      "closing": "no",
+      "gross": "no"
+    },
+    "majority_answer_matches": 76,
+    "answers_compared": 96,
+    "majority_score_mae": 12.350833333333332,
+    "finding": "All 12 held-out text predictions equal the train-majority vector. Lower loss and error versus the untrained base do not demonstrate chat-dependent scoring.",
+    "recommendation": "Do not treat this adapter as a validated primary evaluator; expert review and input-sensitivity validation are required."
   }
 }
