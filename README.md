@@ -168,6 +168,8 @@ if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 Для автоматической оценки впишите ключ в локальный `.env` и запускайте
 `ai.app:app` вместо `backend.main:app`. Инструкция по AI и разметке:
 [docs/ai-gemini.md](docs/ai-gemini.md).
+Проверенные бесплатные квоты, качество RU/KZ/EN и настройки для backend:
+[docs/ai-provider-check.md](docs/ai-provider-check.md).
 Экспериментальное локальное обучение Qwen3 через LoRA и запуск без Gemini-ключа:
 [docs/ai-lora.md](docs/ai-lora.md).
 

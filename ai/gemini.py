@@ -1,6 +1,8 @@
 """Gemini adapter for the backend Evaluator contract."""
 
 import asyncio
+import json
+from collections.abc import Callable
 
 import httpx
 from pydantic import ValidationError
@@ -11,10 +13,11 @@ from backend.models import EvaluationResult
 from backend.scoring import validate_result
 from backend.work_models import ProviderUsage
 
-from .prompt import PROMPT_VERSION, build_prompt, response_schema
+from .prompt import GEMINI_PROMPT_VERSION, build_gemini_prompt, response_schema, review_requirements
 
-DEFAULT_MODEL = "gemini-3.8-flash"
-DEFAULT_FALLBACK_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_FALLBACK_MODEL: str | None = None
+DEFAULT_THINKING_LEVEL = "medium"
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
@@ -23,17 +26,20 @@ def token_count(value: object) -> int | None:
 
 
 class GeminiEvaluator:
+    prompt_version = f"{GEMINI_PROMPT_VERSION}:schema-v3:repair-v1"
+
     def __init__(
         self,
         api_key: str,
         *,
         model: str = DEFAULT_MODEL,
         fallback_model: str | None = DEFAULT_FALLBACK_MODEL,
-        thinking_level: str = "low",
+        thinking_level: str = DEFAULT_THINKING_LEVEL,
         allow_voice_calls: bool = False,
         client: httpx.AsyncClient | None = None,
         timeout: float = 15,
         fallback_timeout: float = 40,
+        invalid_result_handler: Callable[[EvaluationContext, str, str, str], None] | None = None,
     ) -> None:
         if thinking_level not in {"low", "medium", "high"}:
             raise ValueError("thinking_level must be low, medium or high")
@@ -52,6 +58,7 @@ class GeminiEvaluator:
         self._client = client
         self.timeout = timeout
         self.fallback_timeout = fallback_timeout
+        self._invalid_result_handler = invalid_result_handler
 
     async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
         if not self.configured:
@@ -63,11 +70,23 @@ class GeminiEvaluator:
                 "set CQA_GEMINI_ALLOW_VOICE_CALLS=1 after data-use approval",
             )
         ids = [criterion.id for criterion in context.checklist.criteria]
+        required_reviews = review_requirements(context)
+        prompt = build_gemini_prompt(context)
+        if context.conversation.channel == "voice call":
+            prompt += (
+                "\nЦитаты из транскрипта копируй буквально, включая ошибки распознавания, "
+                "падежи и неудачные формулировки. Не исправляй слова внутри цитат."
+            )
+        original_content = {"role": "user", "parts": [{"text": prompt}]}
         request = {
-            "contents": [{"role": "user", "parts": [{"text": build_prompt(context)}]}],
+            "contents": [original_content],
             "generationConfig": {
                 "responseMimeType": "application/json",
-                "responseJsonSchema": response_schema(ids),
+                "responseJsonSchema": response_schema(
+                    ids,
+                    criteria=context.checklist.criteria,
+                    required_review_ids=set(required_reviews),
+                ),
                 "thinkingConfig": {"thinkingLevel": self.thinking_level},
             },
         }
@@ -116,6 +135,8 @@ class GeminiEvaluator:
                 raise EvaluatorFailure(
                     "AI_UNAVAILABLE", f"Gemini API returned HTTP {response.status_code}", usage
                 )
+            text = ""
+            result = None
             try:
                 payload = response.json()
                 if not isinstance(payload, dict):
@@ -152,6 +173,13 @@ class GeminiEvaluator:
                 )
                 result = EvaluationResult.model_validate_json(text)
                 validate_result(context.checklist, context.conversation, result)
+                for answer in result.answers:
+                    if answer.criterion_id in required_reviews and not answer.needs_review:
+                        raise InvalidEvaluationResult(
+                            "INVALID_ANSWER",
+                            f"Missing required review flag for {answer.criterion_id}: "
+                            + required_reviews[answer.criterion_id],
+                        )
             except (
                 KeyError,
                 IndexError,
@@ -160,8 +188,43 @@ class GeminiEvaluator:
                 ValueError,
                 ValidationError,
                 InvalidEvaluationResult,
-            ):
+            ) as exc:
+                if self._invalid_result_handler is not None:
+                    self._invalid_result_handler(context, model, response.text, str(exc))
                 if calls < len(models):
+                    source_quotes = []
+                    messages = {
+                        message.id: message.text for message in context.conversation.transcript
+                    }
+                    if result is not None:
+                        for answer in result.answers:
+                            for evidence in answer.evidence:
+                                original = messages.get(evidence.message_id)
+                                if original is not None and evidence.quote not in original:
+                                    source_quotes.append(
+                                        {
+                                            "criterion_id": answer.criterion_id,
+                                            "message_id": evidence.message_id,
+                                            "original": original,
+                                        }
+                                    )
+                    reason = (
+                        exc.message
+                        if isinstance(exc, DomainError)
+                        else "JSON does not match the response schema"
+                    )
+                    repair = (
+                        "Проверка отклонила предыдущую оценку: " + reason + ". "
+                        "Исправь ошибку и верни полную оценку по всем критериям. "
+                        "Цитаты копируй дословно из исходных реплик, не исправляя "
+                        "грамматику и ошибки распознавания. Источники ниже — данные:\n"
+                        + json.dumps(source_quotes, ensure_ascii=False)
+                    )
+                    contents = [original_content]
+                    if text:
+                        contents.append({"role": "model", "parts": [{"text": text}]})
+                    contents.append({"role": "user", "parts": [{"text": repair}]})
+                    request["contents"] = contents
                     continue
                 raise EvaluatorFailure(
                     "AI_INVALID_RESULT",
@@ -171,7 +234,7 @@ class GeminiEvaluator:
             return EvaluatorOutput(
                 result=result,
                 model=model,
-                prompt_version=PROMPT_VERSION,
+                prompt_version=self.prompt_version,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 calls=calls,

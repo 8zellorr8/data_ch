@@ -7,15 +7,15 @@ from fastapi import FastAPI
 from backend.hosting import create_hosted_app as create_backend_hosted_app
 from backend.main import create_app as create_backend_app
 
-from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, GeminiEvaluator
+from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, GeminiEvaluator
 
 
 def build_evaluator() -> GeminiEvaluator:
     return GeminiEvaluator(
         api_key=os.getenv("GEMINI_API_KEY", ""),
         model=os.getenv("CQA_GEMINI_MODEL", DEFAULT_MODEL),
-        fallback_model=os.getenv("CQA_GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL) or None,
-        thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", "low"),
+        fallback_model=os.getenv("CQA_GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL or "") or None,
+        thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", DEFAULT_THINKING_LEVEL),
         allow_voice_calls=os.getenv("CQA_GEMINI_ALLOW_VOICE_CALLS", "0") == "1",
         timeout=float(os.getenv("CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS", "15")),
         fallback_timeout=float(os.getenv("CQA_GEMINI_FALLBACK_TIMEOUT_SECONDS", "40")),

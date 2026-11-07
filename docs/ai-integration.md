@@ -70,6 +70,13 @@ python -m uvicorn backend.hosting:create_hosted_app --factory
 Она читает `GEMINI_API_KEY`, `CQA_GEMINI_MODEL`,
 `CQA_GEMINI_THINKING_LEVEL` и `CQA_GEMINI_ALLOW_VOICE_CALLS` при запуске.
 
+Для бесплатного проекта проверена `gemini-3.5-flash-lite`, `medium`: 15 RPM,
+250 000 TPM, 500 RPD. `CQA_GEMINI_FALLBACK_MODEL` оставьте пустой,
+`CQA_GEMINI_ALLOW_VOICE_CALLS=1` включает пять DEV-транскриптов без аудио.
+Актуальные результаты, остаток квоты, ограничения качества и настройки очереди:
+[ai-provider-check.md](ai-provider-check.md). Интерфейс Evaluator и расчёт баллов
+не изменены.
+
 Для alwaysdata меняется только цель существующей команды:
 
 ```text
