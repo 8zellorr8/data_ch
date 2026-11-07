@@ -2,12 +2,16 @@
 
 Рабочая версия: **https://replimetr.alwaysdata.net/**.
 Swagger: https://replimetr.alwaysdata.net/docs.
-Развёрнуто и проверено 7 ноября 2026 года. AI не подключён; в публичном демо
-находится только синтетический диалог с ручной оценкой и апелляцией.
-Развёрнутый код на момент этой доработки — `4e6f24a`. Новая HTTP-команда работает
-с уже существующим серверным маршрутом; передача Evaluator в hosted-фабрику
-потребует обновления серверного кода при интеграции AI. Эта доработка не меняет
-живую базу и не переключает конфигурацию сайта.
+Обновлено и проверено 7 ноября 2026 года. Развёрнут commit `4ebace2`, Gemini 3.6
+Flash подключён через окружение сайта. База и история сохранены. В публичном демо
+только синтетические диалоги, ручная оценка и апелляция.
+
+**Текущий предел проверки:** Google вернул 429 из-за исчерпанной суточной квоты
+этого проекта — 20 запросов для Gemini 3.6 Flash. Диагностический ответ содержал
+`retryDelay=53045s` (около 14 часов 44 минут). Это время ожидания на момент ответа,
+а не таймер, который начинается заново при чтении документа. Успешная оценка
+через хостинг пока не подтверждена; успешная локальная синтетическая проверка
+описана в [ai-readiness.md](ai-readiness.md).
 
 ## Что работает без ноутбука
 
@@ -17,7 +21,8 @@ Docker на этом shared-хостинге не используется. Dock
 для VM: [deployment.md](deployment.md).
 
 Существующий frontend и API обслуживаются одним приложением через
-`backend.hosting:create_hosted_app`. Сначала сопоставляются прежние API-маршруты,
+`ai.app:create_hosted_app`, передающую Gemini-адаптер в существующую hosted-фабрику.
+Сначала сопоставляются прежние API-маршруты,
 затем статические файлы **только из frontend/**. Backend, `.env`, SQLite,
 резервные копии и `.git` через этот каталог не публикуются.
 В `frontend/api.js` изменён только адрес подключения по умолчанию:
@@ -29,19 +34,20 @@ Docker на этом shared-хостинге не используется. Dock
 | Назначение | Путь / значение |
 | --- | --- |
 | Аккаунт | replimetr, Free |
-| Код | /home/replimetr/apps/replimetr |
+| Код | /home/replimetr/apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3 |
 | Python | /home/replimetr/venv/bin/python, 3.12.15 при проверке |
 | Рабочая SQLite | /home/replimetr/var/replimetr/cqa.sqlite3 |
 | Проверенные снимки | /home/replimetr/var/replimetr/backups |
 | Сайт | replimetr.alwaysdata.net, site 1101422 |
-| Рабочий каталог в панели | apps/replimetr |
+| Рабочий каталог в панели | apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3 |
+| Предыдущий код для отката | /home/replimetr/apps/replimetr |
 | HTTP host при проверке | http20, локальная файловая система XFS |
 
 Команда сайта (порт 8100 выдан именно этому сайту; для нового аккаунта сверить
 подсказку панели):
 
 ```text
-/home/replimetr/venv/bin/python -m uvicorn backend.hosting:create_hosted_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
+/home/replimetr/venv/bin/python -m uvicorn ai.app:create_hosted_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
 ```
 
 Переменные в поле **Environnement**:
@@ -51,17 +57,24 @@ PYTHON_VERSION=3.12
 PYTHONUNBUFFERED=1
 PYTHONDONTWRITEBYTECODE=1
 CQA_DATABASE_PATH=/home/replimetr/var/replimetr/cqa.sqlite3
-CQA_FRONTEND_PATH=/home/replimetr/apps/replimetr/frontend
+CQA_FRONTEND_PATH=/home/replimetr/apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3/frontend
 CQA_BACKUP_DIRECTORY=/home/replimetr/var/replimetr/backups
 CQA_BACKUP_INTERVAL_SECONDS=21600
 CQA_REQUIRE_LOCAL_SQLITE=1
 CQA_CORS_ORIGINS=https://replimetr.alwaysdata.net
 CQA_AI_CONCURRENCY=1
+CQA_GEMINI_MODEL=gemini-3.6-flash
+CQA_GEMINI_FALLBACK_MODEL=
+CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS=40
+CQA_GEMINI_THINKING_LEVEL=low
+CQA_GEMINI_ALLOW_VOICE_CALLS=0
 ```
 
-AI-ключи и URL организаторов здесь не настроены. Реальные разговоры и платную
-модель нельзя добавлять в открытое демо до настройки защиты доступа: в приложении
-пока нет авторизации. Наличие HTTPS или CORS её не заменяет.
+`GEMINI_API_KEY` задан отдельно в этом же поле; его значение не публикуется.
+URL организаторов на хостинге не настроен. В приложении пока нет авторизации:
+посетители открытого сайта могут обращаться к API и расходовать доступную квоту.
+До публикации реальных разговоров или использования платного лимита настройте
+защиту доступа. Наличие HTTPS или CORS её не заменяет.
 Подготовлены [инструкция и конфигурация reverse proxy](access-control.md);
 действующий сайт автоматически не закрывается.
 
@@ -72,8 +85,8 @@ python -m backend.submission_remote --api https://replimetr.alwaysdata.net --dat
 ```
 
 [Манифест, PROD, обработка ошибок и push](submission.md).
-При появлении адаптера используйте [hosted-фабрику с Evaluator](ai-integration.md),
-сохранив пути БД/копий и параметры команды сайта.
+Контракт [hosted-фабрики с Evaluator](ai-integration.md) сохраняет прежние пути
+БД/копий и API-маршруты.
 
 ## Особенность SQLite: HTTP и SSH — разные серверы
 
@@ -132,10 +145,17 @@ python -m backend.submission_remote --api https://replimetr.alwaysdata.net --dat
 Первый деплой загрузил только исходники backend/frontend и файлы зависимостей.
 Локальная `.env`, рабочие данные и SSH-ключи не переносились в приложение.
 
+При интеграции Gemini точный архив GitHub commit `4ebace2` был загружен отдельной
+одноразовой командой сайта, проверен по SHA-256 и распакован в новый каталог.
+SHA-256 архива: `ea5817f7cc7d1304bb5ebb00eed3535be894b28696bae106154f6098b1ebb5d4`.
+После публикации команда заменена обычным запуском Uvicorn, указанным выше:
+при перезапусках GitHub не нужен, код повторно не скачивается. Зависимости не менялись.
+Git push сам по себе не обновляет этот сервер.
+
 Для следующего обновления удобно подготовить новый каталог через SSH:
 
 ```text
-git clone --single-branch --branch codex/backend-core https://github.com/8zellorr8/data_ch.git /home/replimetr/apps/replimetr-NEW
+git clone --single-branch --branch main https://github.com/8zellorr8/data_ch.git /home/replimetr/apps/replimetr-NEW
 cd /home/replimetr/apps/replimetr-NEW
 /home/replimetr/venv/bin/python -m pip install --no-cache-dir -c requirements-lock.txt .
 ```
@@ -150,13 +170,18 @@ cd /home/replimetr/apps/replimetr-NEW
 ## Проверенный результат
 
 - HTTPS, главная страница, `/docs`, `/health` и чтение чек-листов возвращают 200.
-- `frontend_kit.py --api https://replimetr.alwaysdata.net` прошёл 16 HTTP-шагов.
+- При первоначальном деплое без AI `frontend_kit.py --api https://replimetr.alwaysdata.net`
+  прошёл 16 HTTP-шагов. Этот сценарий ожидает отсутствие AI; после подключения
+  Gemini он не запускался повторно как проверка живой модели.
 - После перезапуска через панель сохранились набор, оценка 75 → 100,
-  ревизия 2 и решение апелляции; в журнале изменился PID Uvicorn.
-- Новая AI-оценка возвращает `503 AI_NOT_CONFIGURED`.
-- Служебные пути (`/.env`, `/backend/schema.sql`, `/cqa.sqlite3`, `/backups`,
+  ревизия 2 и решение апелляции. После дополнительного перезапуска сохранился
+  и новый синтетический набор для проверки Gemini.
+- `/health` возвращает `ai_configured=true`. Это наличие конфигурации, не гарантия
+  свободной квоты. Новая AI-оценка получила `502 AI_UNAVAILABLE` / HTTP 429 Google.
+  У синтетического диалога по-прежнему ноль успешных оценок.
+- Служебные пути (`/.env`, `/backend/schema.sql`, `/ai/gemini.py`, `/cqa.sqlite3`,
   `/.git/config`) возвращают 404.
-- Снимок с тестовым набором, оценкой и апелляцией проверен и восстановлен в
+- При первоначальном деплое снимок с тестовым набором, оценкой и апелляцией проверен и восстановлен в
   отдельный `restore-check-20261107.sqlite3`; рабочая база не заменялась.
 - В браузере видны подключённый сервер, исходные 75 и итоговые 100 баллов.
 
@@ -165,7 +190,7 @@ cd /home/replimetr/apps/replimetr-NEW
 Free: 1 ГБ диска, 256 МБ RAM, 0.25 CPU, личное некоммерческое использование,
 домен `*.alwaysdata.net`. Коммерческий продукт потребует подходящего тарифа.
 Размещение не требует банковской карты. Не устанавливайте локальную LLM на этот
-тариф: памяти мало; будущий облачный AI подключается отдельным адаптером.
+тариф: памяти мало; облачный AI подключён отдельным адаптером.
 
 В течение первого года нужно входить в **панель администратора** минимум раз
 в 120 дней, чтобы аккаунт не признали неактивным. Посещение самого сайта этого
