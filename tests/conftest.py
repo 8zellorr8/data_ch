@@ -1,21 +1,9 @@
-from copy import deepcopy
+"""Pure input fixtures shared by unit and integration tests."""
+
+import json
+from importlib.resources import files
 
 import pytest
-from fastapi.testclient import TestClient
-
-from backend.config import Settings
-from backend.main import create_app
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return Settings(database_path=tmp_path / "test.sqlite3", organizer_api_url="")
-
-
-@pytest.fixture
-def client(settings):
-    with TestClient(create_app(settings)) as client:
-        yield client
 
 
 @pytest.fixture
@@ -47,17 +35,16 @@ def dataset():
 
 
 @pytest.fixture
-def conversation(client, dataset):
-    response = client.post("/api/v1/datasets", json=deepcopy(dataset))
-    assert response.status_code == 201, response.text
-    dataset_id = response.json()["id"]
-    item = client.get(f"/api/v1/datasets/{dataset_id}/conversations").json()["items"][0]
-    return client.get(f"/api/v1/conversations/{item['id']}").json()
-
-
-@pytest.fixture
-def checklist(client):
-    return client.get("/api/v1/checklists/freedom-broker/versions/1").json()
+def checklist():
+    definition = json.loads(
+        files("backend").joinpath("default_checklist.json").read_text(encoding="utf-8")
+    )
+    return {
+        **definition,
+        "checklist_id": "freedom-broker",
+        "version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
 
 
 @pytest.fixture
@@ -78,17 +65,3 @@ def answers(checklist):
             for c in checklist["criteria"]
         ]
     }
-
-
-@pytest.fixture
-def evaluation(client, conversation, answers):
-    response = client.post(
-        "/api/v1/evaluations/manual",
-        json={
-            "conversation_id": conversation["id"],
-            "author": "test-reviewer",
-            "result": answers,
-        },
-    )
-    assert response.status_code == 201, response.text
-    return response.json()

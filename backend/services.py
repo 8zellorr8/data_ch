@@ -5,9 +5,11 @@ import logging
 from time import perf_counter
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from .clock import utc_now
 from .domain import new_appeal, new_evaluation, resolve_appeal
-from .errors import DomainError
+from .errors import DomainError, InvalidEvaluationResult
 from .evaluator import EvaluationContext, Evaluator, EvaluatorOutput
 from .models import (
     AIModelMetadata,
@@ -54,12 +56,12 @@ class EvaluationService:
             raise
         except TimeoutError:
             raise DomainError(
-                "AI_TIMEOUT", f"Model did not respond within {self.timeout:g} seconds", 504
+                "AI_TIMEOUT", f"Model did not respond within {self.timeout:g} seconds"
             ) from None
         except Exception as exc:
             logger.warning("Evaluator failed (%s)", type(exc).__name__)
             raise DomainError(
-                "AI_UNAVAILABLE", "Model evaluator failed; no evaluation was saved", 502
+                "AI_UNAVAILABLE", "Model evaluator failed; no evaluation was saved"
             ) from None
         # Only provider validation errors map to AI_INVALID_RESULT. Storage errors
         # propagate separately and must never be misreported as a model failure.
@@ -69,12 +71,14 @@ class EvaluationService:
         return await asyncio.to_thread(self.store.insert_evaluation, record)
 
     @staticmethod
-    def _prepare(
-        context: EvaluationContext, output: EvaluatorOutput, duration_ms: int
-    ) -> EvaluationRecord:
+    def _prepare(context: EvaluationContext, output: object, duration_ms: int) -> EvaluationRecord:
+        invalid_result_message = (
+            "Model result failed schema, scale, metadata or evidence validation; nothing was saved"
+        )
+        if not isinstance(output, EvaluatorOutput):
+            raise DomainError("AI_INVALID_RESULT", invalid_result_message)
+        # Limit schema-error translation to the data supplied by the adapter.
         try:
-            if not isinstance(output, EvaluatorOutput):
-                raise TypeError("Expected EvaluatorOutput")
             result = EvaluationResult.model_validate(output.result)
             metadata = AIModelMetadata(
                 model=output.model,
@@ -85,6 +89,10 @@ class EvaluationService:
                 audio_analyzed=output.audio_analyzed,
                 duration_ms=duration_ms,
             )
+        except ValidationError:
+            raise DomainError("AI_INVALID_RESULT", invalid_result_message) from None
+
+        try:
             return new_evaluation(
                 context.conversation,
                 context.checklist,
@@ -93,12 +101,8 @@ class EvaluationService:
                 record_id=str(uuid4()),
                 created_at=utc_now(),
             )
-        except (DomainError, ValueError, TypeError, AttributeError):
-            raise DomainError(
-                "AI_INVALID_RESULT",
-                "Model result failed schema, scale, metadata or evidence validation; nothing was saved",
-                502,
-            ) from None
+        except InvalidEvaluationResult:
+            raise DomainError("AI_INVALID_RESULT", invalid_result_message) from None
 
     def evaluate_manual(self, request: ManualEvaluationRequest) -> EvaluationRecord:
         context = self._context(request)

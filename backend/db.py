@@ -25,6 +25,7 @@ from .models import (
     EvaluationSummary,
     Page,
 )
+from .value_types import Channel, Language
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +55,12 @@ class Repository:
             code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
             if code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
                 raise DomainError(
-                    "STORAGE_BUSY", "Storage is busy; retry after reloading the latest state", 503
+                    "STORAGE_BUSY", "Storage is busy; retry after reloading the latest state"
                 ) from None
             # SQLite exception messages may contain SQL or user data.
             logger.error("Storage operation failed (%s)", type(exc).__name__)
             raise DomainError(
-                "STORAGE_ERROR", "Storage operation failed; no successful result was recorded", 500
+                "STORAGE_ERROR", "Storage operation failed; no successful result was recorded"
             ) from None
         except BaseException:
             if conn is not None:
@@ -79,9 +80,15 @@ class Repository:
         )
         with self.connection(write=True) as conn:
             stamp = utc_now()
-            conn.execute("INSERT OR IGNORE INTO checklists VALUES (?,?)", ("freedom-broker", stamp))
             conn.execute(
-                "INSERT OR IGNORE INTO checklist_versions VALUES (?,?,?,?)",
+                "INSERT OR IGNORE INTO checklists (id, created_at) VALUES (?, ?)",
+                ("freedom-broker", stamp),
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO checklist_versions (checklist_id, version, body, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
                 ("freedom-broker", 1, default.model_dump_json(), stamp),
             )
 
@@ -89,7 +96,7 @@ class Repository:
         dataset_id, stamp = str(uuid4()), utc_now()
         with self.connection(write=True) as conn:
             conn.execute(
-                "INSERT INTO datasets VALUES (?,?,?,?)",
+                "INSERT INTO datasets (id, name, group_id, created_at) VALUES (?, ?, ?, ?)",
                 (dataset_id, payload.name, payload.group_id, stamp),
             )
             for index, raw in enumerate(payload.records):
@@ -100,7 +107,11 @@ class Repository:
                 ]
                 conversation = Conversation.model_validate(data)
                 conn.execute(
-                    "INSERT INTO conversations VALUES (?,?,?,?,?,?,?)",
+                    """
+                    INSERT INTO conversations
+                        (id, dataset_id, external_id, language, channel, ordinal, body)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
                     (
                         conversation.id,
                         dataset_id,
@@ -122,21 +133,27 @@ class Repository:
     def list_datasets(self) -> list[DatasetSummary]:
         with self.connection() as conn:
             rows = conn.execute(
-                "SELECT d.*, COUNT(c.id) as count FROM datasets d LEFT JOIN conversations c ON c.dataset_id=d.id GROUP BY d.id ORDER BY d.created_at DESC, d.id"
+                """
+                SELECT d.id, d.name, d.group_id, d.created_at, COUNT(c.id) AS count
+                FROM datasets d
+                LEFT JOIN conversations c ON c.dataset_id = d.id
+                GROUP BY d.id
+                ORDER BY d.created_at DESC, d.id
+                """
             ).fetchall()
             return [DatasetSummary.model_validate(dict(r)) for r in rows]
 
     def list_conversations(
         self,
         dataset_id: str,
-        language: str | None = None,
-        channel: str | None = None,
+        language: Language | None = None,
+        channel: Channel | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> Page[ConversationSummary]:
         with self.connection() as conn:
             if not conn.execute("SELECT 1 FROM datasets WHERE id=?", (dataset_id,)).fetchone():
-                raise DomainError("NOT_FOUND", "Dataset not found", 404)
+                raise DomainError("NOT_FOUND", "Dataset not found")
             where, params = ["dataset_id=?"], [dataset_id]
             if language:
                 where.append("language=?")
@@ -149,7 +166,11 @@ class Repository:
                 f"SELECT COUNT(*) FROM conversations WHERE {clause}", params
             ).fetchone()[0]
             rows = conn.execute(
-                f"SELECT body FROM conversations WHERE {clause} ORDER BY ordinal LIMIT ? OFFSET ?",
+                f"""
+                SELECT body FROM conversations
+                WHERE {clause}
+                ORDER BY ordinal LIMIT ? OFFSET ?
+                """,
                 [*params, limit, offset],
             ).fetchall()
             items = []
@@ -165,7 +186,7 @@ class Repository:
                 "SELECT body FROM conversations WHERE id=?", (conversation_id,)
             ).fetchone()
             if not row:
-                raise DomainError("NOT_FOUND", "Conversation not found", 404)
+                raise DomainError("NOT_FOUND", "Conversation not found")
             return Conversation.model_validate_json(row["body"])
 
     def create_checklist(self, definition: ChecklistDefinition) -> ChecklistVersion:
@@ -174,9 +195,14 @@ class Repository:
             **definition.model_dump(), checklist_id=checklist_id, version=1, created_at=stamp
         )
         with self.connection(write=True) as conn:
-            conn.execute("INSERT INTO checklists VALUES (?,?)", (checklist_id, stamp))
             conn.execute(
-                "INSERT INTO checklist_versions VALUES (?,?,?,?)",
+                "INSERT INTO checklists (id, created_at) VALUES (?, ?)", (checklist_id, stamp)
+            )
+            conn.execute(
+                """
+                INSERT INTO checklist_versions (checklist_id, version, body, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
                 (checklist_id, 1, definition.model_dump_json(), stamp),
             )
         return version
@@ -184,7 +210,15 @@ class Repository:
     def list_checklists(self) -> list[ChecklistSummary]:
         with self.connection() as conn:
             rows = conn.execute(
-                "SELECT v.* FROM checklist_versions v JOIN (SELECT checklist_id, MAX(version) version FROM checklist_versions GROUP BY checklist_id) latest USING(checklist_id,version) ORDER BY v.created_at, v.checklist_id"
+                """
+                SELECT v.checklist_id, v.version, v.body, v.created_at
+                FROM checklist_versions v
+                JOIN (
+                    SELECT checklist_id, MAX(version) AS version
+                    FROM checklist_versions GROUP BY checklist_id
+                ) latest USING (checklist_id, version)
+                ORDER BY v.created_at, v.checklist_id
+                """
             ).fetchall()
             return [
                 ChecklistSummary(
@@ -200,16 +234,23 @@ class Repository:
         with self.connection() as conn:
             if version is None:
                 row = conn.execute(
-                    "SELECT * FROM checklist_versions WHERE checklist_id=? ORDER BY version DESC LIMIT 1",
+                    """
+                    SELECT checklist_id, version, body, created_at FROM checklist_versions
+                    WHERE checklist_id = ?
+                    ORDER BY version DESC LIMIT 1
+                    """,
                     (checklist_id,),
                 ).fetchone()
             else:
                 row = conn.execute(
-                    "SELECT * FROM checklist_versions WHERE checklist_id=? AND version=?",
+                    """
+                    SELECT checklist_id, version, body, created_at FROM checklist_versions
+                    WHERE checklist_id = ? AND version = ?
+                    """,
                     (checklist_id, version),
                 ).fetchone()
             if not row:
-                raise DomainError("NOT_FOUND", "Checklist version not found", 404)
+                raise DomainError("NOT_FOUND", "Checklist version not found")
             return ChecklistVersion(
                 **json.loads(row["body"]),
                 checklist_id=checklist_id,
@@ -225,10 +266,10 @@ class Repository:
                 "SELECT MAX(version) FROM checklist_versions WHERE checklist_id=?", (checklist_id,)
             ).fetchone()[0]
             if latest is None:
-                raise DomainError("NOT_FOUND", "Checklist not found", 404)
+                raise DomainError("NOT_FOUND", "Checklist not found")
             if latest != expected:
                 raise DomainError(
-                    "VERSION_CONFLICT", "Checklist changed; reload its latest version", 409
+                    "VERSION_CONFLICT", "Checklist changed; reload its latest version"
                 )
             version = ChecklistVersion(
                 **definition.model_dump(),
@@ -237,7 +278,10 @@ class Repository:
                 created_at=utc_now(),
             )
             conn.execute(
-                "INSERT INTO checklist_versions VALUES (?,?,?,?)",
+                """
+                INSERT INTO checklist_versions (checklist_id, version, body, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
                 (checklist_id, version.version, definition.model_dump_json(), version.created_at),
             )
         return version
@@ -245,7 +289,12 @@ class Repository:
     def insert_evaluation(self, record: EvaluationRecord) -> EvaluationRecord:
         with self.connection(write=True) as conn:
             conn.execute(
-                "INSERT INTO evaluations VALUES (?,?,?,?,?,?,?,?)",
+                """
+                INSERT INTO evaluations
+                    (id, conversation_id, checklist_id, checklist_version,
+                     origin, revision, created_at, body)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     record.id,
                     record.conversation_id,
@@ -263,7 +312,7 @@ class Repository:
     def _get_evaluation(conn: sqlite3.Connection, evaluation_id: str) -> EvaluationRecord:
         row = conn.execute("SELECT body FROM evaluations WHERE id=?", (evaluation_id,)).fetchone()
         if not row:
-            raise DomainError("NOT_FOUND", "Evaluation not found", 404)
+            raise DomainError("NOT_FOUND", "Evaluation not found")
         record = EvaluationRecord.model_validate_json(row["body"])
         record.appeals = [
             AppealRecord.model_validate_json(r["body"])
@@ -285,12 +334,16 @@ class Repository:
             if not conn.execute(
                 "SELECT 1 FROM conversations WHERE id=?", (conversation_id,)
             ).fetchone():
-                raise DomainError("NOT_FOUND", "Conversation not found", 404)
+                raise DomainError("NOT_FOUND", "Conversation not found")
             total = conn.execute(
                 "SELECT COUNT(*) FROM evaluations WHERE conversation_id=?", (conversation_id,)
             ).fetchone()[0]
             rows = conn.execute(
-                "SELECT id,origin,revision,created_at,body FROM evaluations WHERE conversation_id=? ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+                """
+                SELECT id, origin, revision, created_at, body FROM evaluations
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC, id LIMIT ? OFFSET ?
+                """,
                 (conversation_id, limit, offset),
             ).fetchall()
             items = [
@@ -309,7 +362,7 @@ class Repository:
         with self.connection() as conn:
             row = conn.execute("SELECT body FROM appeals WHERE id=?", (appeal_id,)).fetchone()
             if not row:
-                raise DomainError("NOT_FOUND", "Appeal not found", 404)
+                raise DomainError("NOT_FOUND", "Appeal not found")
             return AppealRecord.model_validate_json(row["body"])
 
     def insert_appeal(self, record: AppealRecord) -> AppealRecord:
@@ -318,20 +371,26 @@ class Repository:
                 "SELECT revision FROM evaluations WHERE id=?", (record.evaluation_id,)
             ).fetchone()
             if not row:
-                raise DomainError("NOT_FOUND", "Evaluation not found", 404)
+                raise DomainError("NOT_FOUND", "Evaluation not found")
             if row["revision"] != record.opened_revision:
                 raise DomainError(
-                    "REVISION_CONFLICT", "Evaluation changed; reload before opening an appeal", 409
+                    "REVISION_CONFLICT", "Evaluation changed; reload before opening an appeal"
                 )
             if conn.execute(
-                "SELECT 1 FROM appeals WHERE evaluation_id=? AND criterion_id=? AND status='open'",
+                """
+                SELECT 1 FROM appeals
+                WHERE evaluation_id = ? AND criterion_id = ? AND status = 'open'
+                """,
                 (record.evaluation_id, record.criterion_id),
             ).fetchone():
                 raise DomainError(
-                    "APPEAL_EXISTS", "An open appeal already exists for this criterion", 409
+                    "APPEAL_EXISTS", "An open appeal already exists for this criterion"
                 )
             conn.execute(
-                "INSERT INTO appeals VALUES (?,?,?,?,?,?)",
+                """
+                INSERT INTO appeals (id, evaluation_id, criterion_id, status, created_at, body)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
                 (
                     record.id,
                     record.evaluation_id,
@@ -352,9 +411,9 @@ class Repository:
                 (appeal.id, evaluation.id),
             ).fetchone()
             if not row:
-                raise DomainError("NOT_FOUND", "Appeal not found", 404)
+                raise DomainError("NOT_FOUND", "Appeal not found")
             if row["status"] != "open":
-                raise DomainError("APPEAL_CLOSED", "This appeal was already resolved", 409)
+                raise DomainError("APPEAL_CLOSED", "This appeal was already resolved")
             # Compare-and-swap prevents two reviewers from overwriting each other.
             cursor = conn.execute(
                 "UPDATE evaluations SET body=?, revision=? WHERE id=? AND revision=?",
@@ -367,9 +426,7 @@ class Repository:
             )
             if cursor.rowcount != 1:
                 raise DomainError(
-                    "REVISION_CONFLICT",
-                    "Evaluation changed; reload before submitting a decision",
-                    409,
+                    "REVISION_CONFLICT", "Evaluation changed; reload before submitting a decision"
                 )
             conn.execute(
                 "UPDATE appeals SET body=?,status='resolved' WHERE id=?",
@@ -381,9 +438,11 @@ class Repository:
 
     def export_dataset(self, dataset_id: str) -> DatasetExport:
         with self.connection() as conn:
-            dataset = conn.execute("SELECT * FROM datasets WHERE id=?", (dataset_id,)).fetchone()
+            dataset = conn.execute(
+                "SELECT id, name, group_id, created_at FROM datasets WHERE id = ?", (dataset_id,)
+            ).fetchone()
             if not dataset:
-                raise DomainError("NOT_FOUND", "Dataset not found", 404)
+                raise DomainError("NOT_FOUND", "Dataset not found")
             conversations = [
                 Conversation.model_validate_json(r["body"])
                 for r in conn.execute(
@@ -394,13 +453,24 @@ class Repository:
             evaluations = [
                 EvaluationRecord.model_validate_json(r["body"])
                 for r in conn.execute(
-                    "SELECT e.body FROM evaluations e JOIN conversations c ON c.id=e.conversation_id WHERE c.dataset_id=? ORDER BY e.created_at, e.id",
+                    """
+                    SELECT e.body FROM evaluations e
+                    JOIN conversations c ON c.id = e.conversation_id
+                    WHERE c.dataset_id = ?
+                    ORDER BY e.created_at, e.id
+                    """,
                     (dataset_id,),
                 )
             ]
             by_id = {evaluation.id: evaluation for evaluation in evaluations}
             for row in conn.execute(
-                "SELECT a.body FROM appeals a JOIN evaluations e ON e.id=a.evaluation_id JOIN conversations c ON c.id=e.conversation_id WHERE c.dataset_id=? ORDER BY a.created_at, a.id",
+                """
+                SELECT a.body FROM appeals a
+                JOIN evaluations e ON e.id = a.evaluation_id
+                JOIN conversations c ON c.id = e.conversation_id
+                WHERE c.dataset_id = ?
+                ORDER BY a.created_at, a.id
+                """,
                 (dataset_id,),
             ):
                 appeal = AppealRecord.model_validate_json(row["body"])

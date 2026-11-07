@@ -1,4 +1,4 @@
-"""Regression tests for concurrency, provider isolation and HTTP contracts."""
+"""Integration regressions for concurrency, provider isolation and HTTP contracts."""
 
 import asyncio
 import threading
@@ -209,7 +209,7 @@ def test_model_success_does_not_disguise_storage_failure(
     app = create_app(settings, ValidEvaluator())
 
     def unavailable(record):
-        raise DomainError("STORAGE_BUSY", "Storage is busy", 503)
+        raise DomainError("STORAGE_BUSY", "Storage is busy")
 
     monkeypatch.setattr(app.state.repository, "insert_evaluation", unavailable)
     with TestClient(app) as client:

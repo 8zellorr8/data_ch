@@ -1,3 +1,5 @@
+"""HTTP contracts backed by real SQLite storage."""
+
 from copy import deepcopy
 
 import pytest

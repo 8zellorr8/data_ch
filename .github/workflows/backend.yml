@@ -15,4 +15,7 @@ jobs:
       - run: python -m ruff check backend scripts tests
       - run: python -m ruff format --check backend scripts tests
       - run: python -m mypy backend
-      - run: python -m pytest -q
+      - name: Unit tests
+        run: python -m pytest tests/unit -q
+      - name: Integration tests
+        run: python -m pytest tests/integration -q

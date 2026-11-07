@@ -55,7 +55,7 @@ def new_appeal(
     evaluation: EvaluationRecord, request: AppealRequest, *, record_id: str, created_at: str
 ) -> AppealRecord:
     if request.criterion_id not in {c.id for c in evaluation.checklist.criteria}:
-        raise DomainError("UNKNOWN_CRITERION", "Criterion is not in this evaluation", 422)
+        raise DomainError("UNKNOWN_CRITERION", "Criterion is not in this evaluation")
     return AppealRecord(
         id=record_id,
         evaluation_id=evaluation.id,
@@ -76,19 +76,19 @@ def resolve_appeal(
     created_at: str,
 ) -> tuple[EvaluationRecord, AppealRecord]:
     if appeal.evaluation_id != evaluation.id:
-        raise DomainError("INVALID_APPEAL", "Appeal does not belong to this evaluation", 422)
+        raise DomainError("INVALID_APPEAL", "Appeal does not belong to this evaluation")
     if appeal.status != "open":
-        raise DomainError("APPEAL_CLOSED", "This appeal was already resolved", 409)
+        raise DomainError("APPEAL_CLOSED", "This appeal was already resolved")
     if evaluation.revision != decision.expected_revision:
         raise DomainError(
-            "REVISION_CONFLICT", "Evaluation changed; reload before submitting a decision", 409
+            "REVISION_CONFLICT", "Evaluation changed; reload before submitting a decision"
         )
     updated = evaluation.model_copy(deep=True)
     previous = next(
         (a for a in updated.final.answers if a.criterion_id == appeal.criterion_id), None
     )
     if previous is None:
-        raise DomainError("UNKNOWN_CRITERION", "Criterion is not in this evaluation", 422)
+        raise DomainError("UNKNOWN_CRITERION", "Criterion is not in this evaluation")
     replacement = CriterionAnswer(
         criterion_id=appeal.criterion_id,
         value=decision.value,

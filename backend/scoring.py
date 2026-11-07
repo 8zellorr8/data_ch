@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from .errors import DomainError
+from .errors import InvalidEvaluationResult
 from .models import (
     AnswerValue,
     ChecklistDefinition,
@@ -23,18 +23,20 @@ def rounded(value: Decimal) -> float:
 def check_value(criterion: Criterion, value: AnswerValue) -> None:
     if value == "na":
         if not criterion.allow_na:
-            raise DomainError("INVALID_ANSWER", f"N/A is not allowed for {criterion.id}", 422)
+            raise InvalidEvaluationResult(
+                "INVALID_ANSWER", f"N/A is not allowed for {criterion.id}"
+            )
     elif criterion.type == "scale":
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
             or value not in criterion.scale
         ):
-            raise DomainError(
-                "INVALID_ANSWER", f"Value is outside the scale for {criterion.id}", 422
+            raise InvalidEvaluationResult(
+                "INVALID_ANSWER", f"Value is outside the scale for {criterion.id}"
             )
     elif value not in ("yes", "no"):
-        raise DomainError("INVALID_ANSWER", f"Expected yes/no for {criterion.id}", 422)
+        raise InvalidEvaluationResult("INVALID_ANSWER", f"Expected yes/no for {criterion.id}")
 
 
 def validate_result(
@@ -43,34 +45,34 @@ def validate_result(
     expected = {c.id: c for c in checklist.criteria}
     ids = [a.criterion_id for a in result.answers]
     if len(set(ids)) != len(ids) or set(ids) != set(expected):
-        raise DomainError(
-            "INVALID_RESULT", "Exactly one answer for every configured criterion is required", 422
+        raise InvalidEvaluationResult(
+            "INVALID_RESULT", "Exactly one answer for every configured criterion is required"
         )
     messages = {m.id: m.text for m in conversation.transcript}
     for answer in result.answers:
         check_value(expected[answer.criterion_id], answer.value)
         if not answer.explanation.strip():
-            raise DomainError("INVALID_RESULT", "Explanation cannot be blank", 422)
+            raise InvalidEvaluationResult("INVALID_RESULT", "Explanation cannot be blank")
         if answer.value == "na" and (
             not answer.na_reason.strip() or answer.evidence_kind != "not_applicable"
         ):
-            raise DomainError(
-                "INVALID_RESULT", "N/A requires a reason and not_applicable evidence kind", 422
+            raise InvalidEvaluationResult(
+                "INVALID_RESULT", "N/A requires a reason and not_applicable evidence kind"
             )
         if answer.value != "na" and answer.evidence_kind == "not_applicable":
-            raise DomainError("INVALID_RESULT", "not_applicable evidence requires N/A", 422)
+            raise InvalidEvaluationResult("INVALID_RESULT", "not_applicable evidence requires N/A")
         if answer.needs_review and not answer.limitation.strip():
-            raise DomainError("INVALID_RESULT", "needs_review requires an explicit limitation", 422)
+            raise InvalidEvaluationResult(
+                "INVALID_RESULT", "needs_review requires an explicit limitation"
+            )
         for evidence in answer.evidence:
             if (
                 not evidence.quote.strip()
                 or evidence.message_id not in messages
                 or evidence.quote not in messages[evidence.message_id]
             ):
-                raise DomainError(
-                    "INVALID_EVIDENCE",
-                    f"Quote does not match message for {answer.criterion_id}",
-                    422,
+                raise InvalidEvaluationResult(
+                    "INVALID_EVIDENCE", f"Quote does not match message for {answer.criterion_id}"
                 )
 
 
@@ -85,7 +87,7 @@ class _Contribution:
 def calculate(checklist: ChecklistDefinition, result: EvaluationResult) -> Score:
     answers = {a.criterion_id: a for a in result.answers}
     if len(answers) != len(result.answers) or set(answers) != {c.id for c in checklist.criteria}:
-        raise DomainError("INVALID_RESULT", "Missing, duplicate or unknown criterion", 422)
+        raise InvalidEvaluationResult("INVALID_RESULT", "Missing, duplicate or unknown criterion")
     earned, maximum = Decimal(0), Decimal(0)
     contributions: list[_Contribution] = []
     flags: list[str] = []

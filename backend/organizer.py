@@ -16,7 +16,6 @@ async def fetch_dataset(api_url: str, request: OrganizerImport) -> DatasetImport
         raise DomainError(
             "ORGANIZER_NOT_CONFIGURED",
             "Set CQA_ORGANIZER_API_URL on the server or import a JSON body",
-            503,
         )
     parsed = urlsplit(api_url)
     if (
@@ -26,7 +25,7 @@ async def fetch_dataset(api_url: str, request: OrganizerImport) -> DatasetImport
         or parsed.password
     ):
         raise DomainError(
-            "ORGANIZER_CONFIG_ERROR", "Organizer URL must be an HTTPS Power Platform endpoint", 503
+            "ORGANIZER_CONFIG_ERROR", "Organizer URL must be an HTTPS Power Platform endpoint"
         )
     query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != "group_id"]
     query.append(("group_id", request.group_id))
@@ -39,17 +38,13 @@ async def fetch_dataset(api_url: str, request: OrganizerImport) -> DatasetImport
             async with client.stream("GET", url) as response:
                 if response.status_code != 200:
                     raise DomainError(
-                        "ORGANIZER_UNAVAILABLE",
-                        f"Organizer returned HTTP {response.status_code}",
-                        502,
+                        "ORGANIZER_UNAVAILABLE", f"Organizer returned HTTP {response.status_code}"
                     )
                 chunks, size = [], 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
                     if size > MAX_BYTES:
-                        raise DomainError(
-                            "DATASET_TOO_LARGE", "Organizer dataset exceeds 8 MiB", 413
-                        )
+                        raise DomainError("DATASET_TOO_LARGE", "Organizer dataset exceeds 8 MiB")
                     chunks.append(chunk)
         # Ignore a mistaken charset header: the organizers' JSON is UTF-8.
         payload = json.loads(b"".join(chunks).decode("utf-8-sig"))
@@ -59,7 +54,7 @@ async def fetch_dataset(api_url: str, request: OrganizerImport) -> DatasetImport
             or not isinstance(payload.get("data"), dict)
         ):
             raise DomainError(
-                "ORGANIZER_INVALID_RESPONSE", "Organizer did not return a successful dataset", 502
+                "ORGANIZER_INVALID_RESPONSE", "Organizer did not return a successful dataset"
             )
         return DatasetImport(
             name=request.name, group_id=request.group_id, records=payload["data"]["records"]
@@ -67,13 +62,12 @@ async def fetch_dataset(api_url: str, request: OrganizerImport) -> DatasetImport
     except (httpx.RequestError, TimeoutError):
         # Do not expose signed URLs, authorization values or remote response bodies.
         raise DomainError(
-            "ORGANIZER_UNAVAILABLE", "Unable to fetch the organizer dataset", 502
+            "ORGANIZER_UNAVAILABLE", "Unable to fetch the organizer dataset"
         ) from None
     except (ValueError, KeyError, TypeError, ValidationError):
         raise DomainError(
             "ORGANIZER_INVALID_RESPONSE",
             "Organizer returned invalid UTF-8 JSON or conversation schema",
-            502,
         ) from None
 
 

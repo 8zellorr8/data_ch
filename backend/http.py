@@ -8,10 +8,35 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .errors import DomainError
+from .errors import DomainError, ErrorCode
 from .models import Contract
 
 logger = logging.getLogger(__name__)
+
+# Preserve the public error codes/statuses while keeping HTTP out of business rules.
+ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
+    "NOT_FOUND": 404,
+    "STORAGE_ERROR": 500,
+    "STORAGE_BUSY": 503,
+    "VERSION_CONFLICT": 409,
+    "REVISION_CONFLICT": 409,
+    "APPEAL_EXISTS": 409,
+    "APPEAL_CLOSED": 409,
+    "UNKNOWN_CRITERION": 422,
+    "INVALID_APPEAL": 422,
+    "INVALID_RESULT": 422,
+    "INVALID_ANSWER": 422,
+    "INVALID_EVIDENCE": 422,
+    "AI_NOT_CONFIGURED": 503,
+    "AI_TIMEOUT": 504,
+    "AI_UNAVAILABLE": 502,
+    "AI_INVALID_RESULT": 502,
+    "ORGANIZER_NOT_CONFIGURED": 503,
+    "ORGANIZER_CONFIG_ERROR": 503,
+    "ORGANIZER_INVALID_RESPONSE": 502,
+    "ORGANIZER_UNAVAILABLE": 502,
+    "DATASET_TOO_LARGE": 413,
+}
 
 
 class ValidationDetail(Contract):
@@ -97,7 +122,7 @@ class UnexpectedErrorMiddleware:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
-        return error_response(exc.code, exc.message, exc.status)
+        return error_response(exc.code, exc.message, ERROR_HTTP_STATUS[exc.code])
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

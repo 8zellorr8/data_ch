@@ -1,3 +1,5 @@
+"""Pure arithmetic tests: no HTTP application or database fixtures."""
+
 from copy import deepcopy
 
 import pytest

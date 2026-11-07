@@ -37,5 +37,4 @@ class UnconfiguredEvaluator:
         raise DomainError(
             "AI_NOT_CONFIGURED",
             "AI is not connected yet. Import, checklists and manual evaluations are available.",
-            503,
         )

@@ -53,7 +53,12 @@ def test_organizer_contract_and_redacted_errors(monkeypatch, dataset, kind, capl
     else:
         with pytest.raises(DomainError) as error:
             asyncio.run(coroutine)
-        assert error.value.status == 502
+        expected_code = (
+            "ORGANIZER_UNAVAILABLE"
+            if kind in {"redirect", "unavailable"}
+            else "ORGANIZER_INVALID_RESPONSE"
+        )
+        assert error.value.code == expected_code
         assert "private-test-secret" not in error.value.message
     assert "private-test-secret" not in caplog.text
 

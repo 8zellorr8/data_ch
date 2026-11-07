@@ -12,6 +12,8 @@ from pydantic import (
     model_validator,
 )
 
+from .value_types import Channel, EvidenceKind, Language, NonBlank
+
 Text = Annotated[str, Field(min_length=1, max_length=100_000)]
 Identifier = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")]
 AnswerValue = Literal["yes", "no", "na"] | StrictInt | StrictFloat
@@ -33,8 +35,8 @@ class Message(MessageInput):
 
 class ConversationInput(Contract):
     conversation_id: Annotated[str, Field(min_length=1, max_length=200)]
-    language: Literal["RU", "KZ", "EN"]
-    channel: Literal["agent chat", "voice call"]
+    language: Language
+    channel: Channel
     transcript: Annotated[list[MessageInput], Field(min_length=1, max_length=5000)]
     audio_url: str | None = None
 
@@ -57,15 +59,15 @@ class Conversation(Contract):
     id: str
     dataset_id: str
     conversation_id: str
-    language: Literal["RU", "KZ", "EN"]
-    channel: Literal["agent chat", "voice call"]
+    language: Language
+    channel: Channel
     transcript: list[Message]
     audio_url: str | None
 
 
 class DatasetImport(Contract):
-    name: Annotated[str, Field(min_length=1, max_length=200)]
-    group_id: Annotated[str, Field(min_length=1, max_length=100)] = "DEV"
+    name: Annotated[NonBlank, Field(min_length=1, max_length=200)]
+    group_id: Annotated[NonBlank, Field(min_length=1, max_length=100)] = "DEV"
     records: Annotated[list[ConversationInput], Field(min_length=1, max_length=1000)]
 
     @model_validator(mode="after")
@@ -77,17 +79,17 @@ class DatasetImport(Contract):
 
 
 class OrganizerImport(Contract):
-    group_id: Annotated[str, Field(min_length=1, max_length=100)] = "DEV"
-    name: Annotated[str, Field(min_length=1, max_length=200)] = "Organizer dataset"
+    group_id: Annotated[NonBlank, Field(min_length=1, max_length=100)] = "DEV"
+    name: Annotated[NonBlank, Field(min_length=1, max_length=200)] = "Organizer dataset"
 
 
 class Criterion(Contract):
     id: Identifier
-    name: Annotated[str, Field(min_length=1, max_length=200)]
+    name: Annotated[NonBlank, Field(min_length=1, max_length=200)]
     section: Annotated[str, Field(max_length=200)] = ""
     type: Literal["binary", "scale", "flag"]
     weight: Annotated[float, Field(strict=True, ge=0, le=1000)]
-    rule: Annotated[str, Field(min_length=1, max_length=20_000)]
+    rule: Annotated[NonBlank, Field(min_length=1, max_length=20_000)]
     call_rule: Annotated[str, Field(max_length=20_000)] = ""
     allow_na: bool = False
     na_rule: Annotated[str, Field(max_length=5000)] = ""
@@ -95,8 +97,6 @@ class Criterion(Contract):
 
     @model_validator(mode="after")
     def valid_definition(self) -> Self:
-        if not self.name.strip() or not self.rule.strip():
-            raise ValueError("name and rule must not be blank")
         if self.allow_na and not self.na_rule.strip():
             raise ValueError("allow_na requires na_rule")
         if self.type == "flag" and self.weight != 0:
@@ -118,14 +118,12 @@ class Criterion(Contract):
 
 
 class ChecklistDefinition(Contract):
-    name: Annotated[str, Field(min_length=1, max_length=200)]
+    name: Annotated[NonBlank, Field(min_length=1, max_length=200)]
     global_rules: Annotated[str, Field(max_length=20_000)] = ""
     criteria: Annotated[list[Criterion], Field(min_length=1, max_length=40)]
 
     @model_validator(mode="after")
     def unique_criteria(self) -> Self:
-        if not self.name.strip():
-            raise ValueError("name must not be blank")
         ids = [c.id for c in self.criteria]
         if len(set(ids)) != len(ids):
             raise ValueError("criterion ids must be unique")
@@ -152,7 +150,7 @@ class CriterionAnswer(Contract):
     criterion_id: Identifier
     value: AnswerValue
     explanation: Annotated[str, Field(min_length=1, max_length=20_000)]
-    evidence_kind: Literal["present", "missing", "not_applicable"]
+    evidence_kind: EvidenceKind
     evidence: Annotated[list[Evidence], Field(min_length=1, max_length=30)]
     na_reason: Annotated[str, Field(max_length=5000)] = ""
     needs_review: bool = False
@@ -171,29 +169,22 @@ class EvaluationRequest(Contract):
 
 class ManualEvaluationRequest(EvaluationRequest):
     result: EvaluationResult
-    author: Annotated[str, Field(min_length=1, max_length=100)]
+    author: Annotated[NonBlank, Field(min_length=1, max_length=100)]
 
 
 class AppealRequest(Contract):
     criterion_id: Identifier
-    comment: Annotated[str, Field(min_length=1, max_length=5000)]
-    author: Annotated[str, Field(min_length=1, max_length=100)]
+    comment: Annotated[NonBlank, Field(min_length=1, max_length=5000)]
+    author: Annotated[NonBlank, Field(min_length=1, max_length=100)]
 
 
 class AppealDecision(Contract):
     expected_revision: Annotated[int, Field(strict=True, ge=1)]
     value: AnswerValue
-    reason: Annotated[str, Field(min_length=1, max_length=5000)]
-    reviewer: Annotated[str, Field(min_length=1, max_length=100)]
-    evidence_kind: Literal["present", "missing", "not_applicable"]
+    reason: Annotated[NonBlank, Field(min_length=1, max_length=5000)]
+    reviewer: Annotated[NonBlank, Field(min_length=1, max_length=100)]
+    evidence_kind: EvidenceKind
     evidence: Annotated[list[Evidence], Field(min_length=1, max_length=30)]
-
-    @field_validator("reason", "reviewer")
-    @classmethod
-    def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be blank")
-        return value
 
 
 class CriterionScore(Contract):
@@ -220,20 +211,13 @@ class Score(Contract):
 
 
 class AIModelMetadata(Contract):
-    model: Annotated[str, Field(min_length=1, max_length=200)]
-    prompt_version: Annotated[str, Field(min_length=1, max_length=200)]
+    model: Annotated[NonBlank, Field(min_length=1, max_length=200)]
+    prompt_version: Annotated[NonBlank, Field(min_length=1, max_length=200)]
     input_tokens: Annotated[int, Field(strict=True, ge=0)] | None = None
     output_tokens: Annotated[int, Field(strict=True, ge=0)] | None = None
     calls: Annotated[int, Field(strict=True, ge=1)] = 1
     audio_analyzed: Annotated[bool, Field(strict=True)] = False
     duration_ms: Annotated[int, Field(strict=True, ge=0)]
-
-    @field_validator("model", "prompt_version")
-    @classmethod
-    def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be blank")
-        return value
 
 
 class ManualMetadata(Contract):
@@ -248,7 +232,7 @@ class ReviewRecord(Contract):
     value: AnswerValue
     reason: str
     reviewer: str
-    evidence_kind: Literal["present", "missing", "not_applicable"]
+    evidence_kind: EvidenceKind
     evidence: list[Evidence]
     created_at: str
 
@@ -298,8 +282,8 @@ class ConversationSummary(Contract):
     id: str
     dataset_id: str
     conversation_id: str
-    language: Literal["RU", "KZ", "EN"]
-    channel: Literal["agent chat", "voice call"]
+    language: Language
+    channel: Channel
     audio_url: str | None
     message_count: int
 

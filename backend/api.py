@@ -1,7 +1,7 @@
 """Transport adapters. Application scenarios and arithmetic live elsewhere."""
 
 from dataclasses import dataclass
-from typing import Annotated, Literal, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
@@ -30,6 +30,7 @@ from .models import (
     Page,
 )
 from .services import AppealService, EvaluationService, ImportService
+from .value_types import Channel, Language
 
 
 @dataclass(frozen=True)
@@ -78,8 +79,8 @@ def datasets(services: Services) -> Items[DatasetSummary]:
 def conversations(
     dataset_id: str,
     services: Services,
-    language: Literal["RU", "KZ", "EN"] | None = None,
-    channel: Literal["agent chat", "voice call"] | None = None,
+    language: Language | None = None,
+    channel: Channel | None = None,
     limit: Limit = 100,
     offset: Offset = 0,
 ) -> Page[ConversationSummary]:
