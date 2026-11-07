@@ -103,6 +103,41 @@ def test_gemini_rejects_invented_quote(checklist: dict, answers: dict) -> None:
     asyncio.run(run())
 
 
+def test_gemini_uses_current_custom_checklist(checklist: dict, answers: dict) -> None:
+    criterion = {**checklist["criteria"][0], "id": "custom_contact", "name": "Custom greeting"}
+    checklist = {**checklist, "criteria": [criterion]}
+    answer = {**answers["answers"][0], "criterion_id": "custom_contact"}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert "Custom greeting" in body["contents"][0]["parts"][0]["text"]
+        schema = body["generationConfig"]["responseSchema"]
+        assert schema["properties"]["answers"]["minItems"] == 1
+        assert schema["properties"]["answers"]["items"]["properties"]["criterion_id"]["enum"] == [
+            "custom_contact"
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {"parts": [{"text": json.dumps({"answers": [answer]})}]},
+                    }
+                ]
+            },
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            output = await GeminiEvaluator("test-key", client=client).evaluate(
+                make_context(checklist)
+            )
+        assert [item.criterion_id for item in output.result.answers] == ["custom_contact"]
+
+    asyncio.run(run())
+
+
 def test_voice_call_requires_explicit_opt_in(checklist: dict) -> None:
     context = make_context(checklist)
     context.conversation.channel = "voice call"

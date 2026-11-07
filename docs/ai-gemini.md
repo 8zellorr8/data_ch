@@ -70,7 +70,7 @@ Gemini доступен через API и не является базовой �
 ```powershell
 uv venv --python 3.12 .venv-train
 uv pip install --python .venv-train\Scripts\python.exe -e .
-uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 transformers datasets peft trl accelerate
+uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 transformers==5.22.2 datasets==5.1.0 peft==0.21.2 trl==1.17.1 accelerate==1.15.0
 ```
 
 Для CUDA-обучения замените обычную сборку `torch` на вариант по
@@ -86,6 +86,15 @@ uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 transformers
 если пример будет обрезан длиной `--max-length`. Для пробного набора укажите
 `--train data/labels/seed-sft/train.jsonl --validation data/labels/seed-sft/validation.jsonl`.
 Адаптер и манифест обучения сохраняются локально в выбранном `--output`.
+В этой рабочей копии веса `Qwen/Qwen3-0.6B` уже скачаны в локальную папку
+`data/models/qwen3-0.6b/` и сверены по SHA-256. Один пробный шаг на CPU можно
+запустить так:
+
+```powershell
+.\.venv-train\Scripts\python.exe -m ai.train_lora --train data/labels/seed-sft/train.jsonl --validation data/labels/seed-sft/validation.jsonl --model data/models/qwen3-0.6b --output data/lora/seed-qwen3 --device cpu --epochs 0.1 --max-length 4096
+```
+
+Один шаг подтверждает работу пайплайна, но не делает модель готовой к оценке чатов.
 Проверка трёх отложенных чатов:
 
 ```powershell

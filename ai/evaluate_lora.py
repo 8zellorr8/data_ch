@@ -74,7 +74,11 @@ def main() -> None:
         checklist = ChecklistVersion.model_validate(draft["checklist"])
         reference = EvaluationResult.model_validate(draft["result"])
         encoded = tokenizer.apply_chat_template(
-            row["prompt"], tokenize=True, add_generation_prompt=True, return_tensors="pt"
+            row["prompt"],
+            tokenize=True,
+            add_generation_prompt=True,
+            enable_thinking=False,
+            return_tensors="pt",
         ).to(device)
         with torch.inference_mode():
             generated = model.generate(
