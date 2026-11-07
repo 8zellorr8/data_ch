@@ -1,7 +1,6 @@
 """Export or recheck submission files without starting the API, worker or AI."""
 
 import argparse
-import json
 import os
 from pathlib import Path
 
@@ -10,7 +9,7 @@ from pydantic import ValidationError
 from .db import Repository
 from .errors import DomainError
 from .submission import SubmissionRequest, SubmissionService
-from .submission_files import publish, read_json
+from .submission_files import matches_json, publish, read_json
 from .work_store import WorkStore
 
 
@@ -42,12 +41,7 @@ def main() -> None:
             args.dataset_id, request
         )
         if args.check:
-            # Canonical JSON comparison keeps booleans distinct from integer 1/0.
-            actual = json.dumps(read_json(output), sort_keys=True, ensure_ascii=False)
-            expected = json.dumps(
-                document.model_dump(mode="json"), sort_keys=True, ensure_ascii=False
-            )
-            if actual != expected:
+            if not matches_json(read_json(output), document.model_dump(mode="json")):
                 raise ValueError("File differs from validated original AI results")
         else:
             publish(output, document.model_dump_json(indent=2), args.overwrite)

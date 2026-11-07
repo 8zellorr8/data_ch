@@ -1,8 +1,12 @@
 # Replimetr на alwaysdata Free
 
+> Обновление документации 8 ноября не выполняет deploy. Общий main после
+> объединения веток новее указанного релиза; push не переключает сайт.
+> Проверка сдачи с локального компьютера: [submission_check](submission.md#проверка-готовности-перед-выгрузкой).
+
 Рабочая версия: **https://replimetr.alwaysdata.net/**.
 Swagger: https://replimetr.alwaysdata.net/docs.
-Обновлено и проверено 7 ноября 2026 года. Развёрнут commit `4ebace2`, Gemini 3.6
+Последнее подтверждённое обновление сервера — 7 ноября 2026 года, commit `d88ba31`, Gemini 3.6
 Flash подключён через окружение сайта. База и история сохранены. В публичном демо
 только синтетические диалоги, ручная оценка и апелляция.
 
@@ -26,7 +30,9 @@ Docker на этом shared-хостинге не используется. Dock
 затем статические файлы **только из frontend/**. Backend, `.env`, SQLite,
 резервные копии и `.git` через этот каталог не публикуются.
 В `frontend/api.js` изменён только адрес подключения по умолчанию:
-на публичном домене используется текущий origin, на localhost остаётся порт 8000.
+в последнем развёрнутом релизе на публичном домене используется текущий origin,
+на localhost остаётся порт 8000. В новом main локальный frontend использует свой
+origin и relay frontend/serve.py; для локального backend задайте --api явно.
 Пользовательская настройка адреса по-прежнему имеет приоритет.
 
 ## Фактическая конфигурация
@@ -34,13 +40,13 @@ Docker на этом shared-хостинге не используется. Dock
 | Назначение | Путь / значение |
 | --- | --- |
 | Аккаунт | replimetr, Free |
-| Код | /home/replimetr/apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3 |
+| Код | /home/replimetr/apps/releases/d88ba31fff2ba8e7d8a8732a5bd43406364ce086 |
 | Python | /home/replimetr/venv/bin/python, 3.12.15 при проверке |
 | Рабочая SQLite | /home/replimetr/var/replimetr/cqa.sqlite3 |
 | Проверенные снимки | /home/replimetr/var/replimetr/backups |
 | Сайт | replimetr.alwaysdata.net, site 1101422 |
-| Рабочий каталог в панели | apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3 |
-| Предыдущий код для отката | /home/replimetr/apps/replimetr |
+| Рабочий каталог в панели | apps/releases/d88ba31fff2ba8e7d8a8732a5bd43406364ce086 |
+| Предыдущий релиз | /home/replimetr/apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3 |
 | HTTP host при проверке | http20, локальная файловая система XFS |
 
 Команда сайта (порт 8100 выдан именно этому сайту; для нового аккаунта сверить
@@ -57,7 +63,7 @@ PYTHON_VERSION=3.12
 PYTHONUNBUFFERED=1
 PYTHONDONTWRITEBYTECODE=1
 CQA_DATABASE_PATH=/home/replimetr/var/replimetr/cqa.sqlite3
-CQA_FRONTEND_PATH=/home/replimetr/apps/releases/4ebace2d2884bf04c0baadb396f7b5d1899303f3/frontend
+CQA_FRONTEND_PATH=/home/replimetr/apps/releases/d88ba31fff2ba8e7d8a8732a5bd43406364ce086/frontend
 CQA_BACKUP_DIRECTORY=/home/replimetr/var/replimetr/backups
 CQA_BACKUP_INTERVAL_SECONDS=21600
 CQA_REQUIRE_LOCAL_SQLITE=1

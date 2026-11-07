@@ -4,11 +4,14 @@ import json
 import subprocess
 import sys
 from copy import deepcopy
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
 
+from backend.db import Repository
 from backend.domain import new_evaluation
+from backend.errors import DomainError
 from backend.models import AIModelMetadata, DatasetImport, EvaluationResult, ManualMetadata
 from backend.submission import SubmissionRequest
 from backend.submission_remote import download, endpoint
@@ -87,6 +90,205 @@ def run_cli(settings, dataset_id, manifest, output, *flags):
         capture_output=True,
         timeout=15,
     )
+
+
+def run_readiness(settings, dataset_id, manifest, *flags):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "backend.submission_check",
+            "--database",
+            str(settings.database_path),
+            "--dataset-id",
+            dataset_id,
+            "--manifest",
+            str(manifest),
+            "--json",
+            *flags,
+        ],
+        capture_output=True,
+        timeout=15,
+    )
+
+
+def test_readiness_distinguishes_valid_export_from_failed_dialogues(
+    client, submission_data, settings, tmp_path
+):
+    dataset_id, payload = submission_data
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    repo = client.app.state.repository
+    with repo.connection() as conn:
+        before = list(conn.iterdump())
+    files_before = set(tmp_path.iterdir())
+    result = run_readiness(settings, dataset_id, manifest)
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "export_ready_with_errors"
+    assert report["can_export"] is True
+    assert report["total_results"] == 10
+    assert report["successful_results"] == 9
+    assert report["error_results"] == 1
+    assert report["failed_conversation_ids"] == ["original-10"]
+    assert report["file_status"] == "not_checked"
+    assert "transcript" not in report and "criteria" not in report
+    with repo.connection() as conn:
+        assert list(conn.iterdump()) == before
+    assert set(tmp_path.iterdir()) == files_before
+
+
+def test_readiness_all_scored_and_original_file_survive_appeal(
+    client, submission_data, settings, tmp_path
+):
+    dataset_id, payload = submission_data
+    repo = client.app.state.repository
+    snapshot = repo.export_dataset(dataset_id)
+    original = snapshot.evaluations[0]
+    record = repo.insert_evaluation(
+        new_evaluation(
+            snapshot.conversations[-1],
+            original.checklist,
+            original.original,
+            original.metadata,
+            record_id=str(uuid4()),
+            created_at="2026-01-01T00:00:00Z",
+        )
+    )
+    payload["items"][-1] = {
+        "conversation_id": snapshot.conversations[-1].conversation_id,
+        "evaluation_id": record.id,
+    }
+    manifest, output = tmp_path / "manifest.json", tmp_path / "results.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    expected = submit(client, submission_data).json()
+    output.write_text(json.dumps(expected), encoding="utf-8")
+    original_file = output.read_bytes()
+    appeal = client.post(
+        f"/api/v1/evaluations/{record.id}/appeals",
+        json={"criterion_id": "gross", "author": "QA", "comment": "Synthetic review"},
+    ).json()
+    assert (
+        client.post(
+            f"/api/v1/appeals/{appeal['id']}/decision",
+            json={
+                "expected_revision": 1,
+                "value": "yes",
+                "reviewer": "QA",
+                "reason": "Synthetic",
+                "evidence_kind": "present",
+                "evidence": [{"message_id": "m4", "quote": "Здравствуйте"}],
+            },
+        ).status_code
+        == 200
+    )
+    result = run_readiness(settings, dataset_id, manifest, "--results-file", str(output))
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "export_ready" and report["error_results"] == 0
+    assert report["file_status"] == "matches"
+    assert output.read_bytes() == original_file
+
+
+@pytest.mark.parametrize("corruption", ["boolean", "score", "duplicate_key", "nan", "missing"])
+def test_readiness_rejects_changed_or_invalid_file_without_overwriting(
+    client, submission_data, settings, tmp_path, corruption
+):
+    dataset_id, payload = submission_data
+    manifest, output = tmp_path / "manifest.json", tmp_path / "results.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    document = submit(client, submission_data).json()
+    if corruption == "boolean":
+        document["results"][0]["criteria"][0]["value"] = 1
+    if corruption == "score":
+        document["results"][0]["score"]["final_score"] = 0
+    raw = json.dumps(document).encode()
+    if corruption == "duplicate_key":
+        raw = b'{"private": 1, "private": 2}'
+    if corruption == "nan":
+        raw = b'{"private": NaN}'
+    if corruption != "missing":
+        output.write_bytes(raw)
+    result = run_readiness(settings, dataset_id, manifest, "--results-file", str(output))
+    assert result.returncode == 2, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "blocked"
+    assert report["can_export"] is True  # Stored originals remain valid.
+    assert report["issue_code"] in {"RESULTS_MISMATCH", "INVALID_RESULTS_FILE"}
+    assert b"private" not in result.stdout
+    assert output.read_bytes() == raw if output.exists() else corruption == "missing"
+
+
+@pytest.mark.parametrize("problem", ["missing_evaluation", "manual", "unfinished", "wrong_count"])
+def test_readiness_reuses_export_validation(client, submission_data, settings, tmp_path, problem):
+    dataset_id, payload = submission_data
+    repo = client.app.state.repository
+    if problem == "missing_evaluation":
+        payload["items"][0]["evaluation_id"] = "missing-evaluation"
+    elif problem == "manual":
+        conversation = repo.export_dataset(dataset_id).conversations[0]
+        original = repo.get_evaluation(payload["items"][0]["evaluation_id"])
+        record = repo.insert_evaluation(
+            new_evaluation(
+                conversation,
+                original.checklist,
+                original.original,
+                ManualMetadata(author="QA"),
+                record_id=str(uuid4()),
+                created_at="2026-01-01T00:00:00Z",
+            )
+        )
+        payload["items"][0]["evaluation_id"] = record.id
+    elif problem == "unfinished":
+        from backend.work_store import WorkStore
+
+        store = WorkStore(repo)
+        batch = store.create_batch(
+            BatchRequest(
+                conversation_ids=[c.id for c in repo.export_dataset(dataset_id).conversations],
+                checklist_id="freedom-broker",
+                checklist_version=1,
+            ),
+            1000,
+        )
+        payload.pop("items")
+        payload["batch_id"] = batch.id
+    else:
+        payload["split"] = "dev"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    expected = submit(client, (dataset_id, payload))
+    assert expected.status_code == 422
+    with repo.connection() as conn:
+        before = list(conn.iterdump())
+    result = run_readiness(settings, dataset_id, manifest)
+    assert result.returncode == 2, result.stderr
+    report = json.loads(result.stdout)
+    assert report["can_export"] is False
+    assert report["issue_code"] == expected.json()["error"]["code"]
+    assert report["message"] == expected.json()["error"]["message"]
+    with repo.connection() as conn:
+        assert list(conn.iterdump()) == before
+
+
+def test_readiness_missing_database_is_not_created(submission_data, settings, tmp_path):
+    dataset_id, payload = submission_data
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    missing_settings = replace(settings, database_path=tmp_path / "absent.sqlite3")
+    result = run_readiness(missing_settings, dataset_id, manifest)
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["issue_code"] == "DATABASE_NOT_FOUND"
+    assert not missing_settings.database_path.exists()
+
+
+def test_read_only_repository_rejects_writes(settings, client):
+    repo = Repository(settings.database_path, read_only=True)
+    assert repo.get_checklist("freedom-broker", 1).version == 1
+    with pytest.raises(DomainError, match="Storage operation failed"):
+        with repo.connection(write=True) as conn:
+            conn.execute("DELETE FROM checklist_versions")
+    assert client.app.state.repository.get_checklist("freedom-broker", 1).version == 1
 
 
 def test_api_and_cli_match_appendix_and_keep_old_export(

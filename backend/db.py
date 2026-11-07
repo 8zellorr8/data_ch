@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 class Repository:
-    def __init__(self, path: Path, timeout: float = 15) -> None:
+    def __init__(self, path: Path, timeout: float = 15, *, read_only: bool = False) -> None:
         self.path = Path(path)
         self.timeout = timeout
+        self.read_only = read_only
 
     @contextmanager
     def connection(
@@ -42,8 +43,14 @@ class Repository:
     ) -> Iterator[sqlite3.Connection]:
         conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(self.path, timeout=self.timeout, isolation_level=None)
+            target = self.path.resolve().as_uri() + "?mode=ro" if self.read_only else str(self.path)
+            conn = sqlite3.connect(
+                target, uri=self.read_only, timeout=self.timeout, isolation_level=None
+            )
             conn.row_factory = sqlite3.Row
+            if self.read_only:
+                # Diagnostic readers must neither create a missing DB nor write to it.
+                conn.execute("PRAGMA query_only=ON")
             conn.execute("PRAGMA foreign_keys=ON")
             if transaction:
                 # Explicit read transactions keep evaluations and appeals in one snapshot.

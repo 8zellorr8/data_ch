@@ -35,6 +35,13 @@ def read_json(path: Path) -> Any:
         return parse_json(stream.read(MAX_JSON_BYTES + 1))
 
 
+def matches_json(actual: Any, expected: Any) -> bool:
+    # Python equality alone treats True == 1. The organizer schema does not.
+    return json.dumps(actual, sort_keys=True, ensure_ascii=False) == json.dumps(
+        expected, sort_keys=True, ensure_ascii=False
+    )
+
+
 def publish(path: Path, text: str, overwrite: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None

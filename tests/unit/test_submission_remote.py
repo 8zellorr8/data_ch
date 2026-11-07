@@ -6,6 +6,7 @@ from copy import deepcopy
 import httpx
 import pytest
 
+from backend import submission_check
 from backend import submission_remote as remote
 from backend.submission import SubmissionRequest
 from backend.submission_files import publish
@@ -31,6 +32,101 @@ def request_and_document():
         ],
     }
     return request, document
+
+
+@pytest.mark.parametrize("status", [200, 422, 503])
+def test_readiness_http_is_read_only_and_does_not_hide_failed_dialogues(
+    monkeypatch, tmp_path, request_and_document, capsys, status
+):
+    request, document = request_and_document
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(request), encoding="utf-8")
+    result_file = tmp_path / "results.json"
+    result_file.write_text(json.dumps(document), encoding="utf-8")
+    before = result_file.read_bytes()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check",
+            "--api",
+            "https://example.test",
+            "--dataset-id",
+            "dataset-id",
+            "--manifest",
+            str(manifest),
+            "--results-file",
+            str(result_file),
+            "--json",
+        ],
+    )
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        assert req.method == "POST"
+        assert req.url.path == "/api/v1/datasets/dataset-id/submission"
+        assert json.loads(req.content) == SubmissionRequest.model_validate(request).model_dump(
+            mode="json"
+        )
+        return httpx.Response(
+            status,
+            json=document if status == 200 else {"error": "private transcript and secret"},
+        )
+
+    client_type = httpx.Client
+    monkeypatch.setattr(
+        submission_check.httpx,
+        "Client",
+        lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw),
+    )
+    with pytest.raises(SystemExit) as exc:
+        submission_check.main()
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert len(calls) == 1 and result_file.read_bytes() == before
+    assert "private transcript" not in captured.out and "secret" not in captured.out
+    if status == 200:
+        assert exc.value.code == 1
+        assert report["status"] == "export_ready_with_errors"
+        assert report["successful_results"] == 0 and report["error_results"] == 10
+        assert report["file_status"] == "matches"
+    else:
+        assert exc.value.code == 2
+        assert report["status"] == "blocked" and report["can_export"] is False
+        assert report["issue_code"] == "HTTP_ERROR"
+
+
+@pytest.mark.parametrize("bad_manifest", [b'{"secret": NaN}', b'{"a":1,"a":2}', b"{}"])
+def test_readiness_invalid_manifest_never_connects(monkeypatch, tmp_path, capsys, bad_manifest):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_bytes(bad_manifest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check",
+            "--api",
+            "https://example.test",
+            "--dataset-id",
+            "dataset-id",
+            "--manifest",
+            str(manifest),
+            "--json",
+        ],
+    )
+
+    def unexpected_client(**kwargs):
+        pytest.fail("Manifest must be validated before any HTTP request")
+
+    monkeypatch.setattr(submission_check.httpx, "Client", unexpected_client)
+    with pytest.raises(SystemExit) as exc:
+        submission_check.main()
+    assert exc.value.code == 2
+    output = capsys.readouterr().out
+    assert json.loads(output)["issue_code"] == "INVALID_MANIFEST"
+    assert "secret" not in output
 
 
 def fetch(request, handler):
