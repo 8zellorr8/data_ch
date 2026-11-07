@@ -1,0 +1,14 @@
+{
+  "name": "Искусственный пример для интерфейса",
+  "group_id": "EXAMPLE",
+  "records": [{
+    "conversation_id": "synthetic-example-1",
+    "language": "RU",
+    "channel": "agent chat",
+    "transcript": [
+      {"timestamp": "09:00:00", "speaker": "client", "text": "Здравствуйте! Где инструкция?"},
+      {"timestamp": "09:00:03", "speaker": "operator", "text": "Здравствуйте, я Анна. Инструкция в разделе Помощь. До свидания!"}
+    ],
+    "audio_url": null
+  }]
+}
