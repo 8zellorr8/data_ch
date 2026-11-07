@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ -x .venv-dev/Scripts/python.exe ]; then
+  .venv-dev/Scripts/python.exe -m scripts.check_secrets --staged
+elif [ -x .venv/Scripts/python.exe ]; then
+  .venv/Scripts/python.exe -m scripts.check_secrets --staged
+elif [ -x .venv/bin/python ]; then
+  .venv/bin/python -m scripts.check_secrets --staged
+elif command -v python3 >/dev/null 2>&1; then
+  python3 -m scripts.check_secrets --staged
+else
+  echo 'Python is required for the secret check' >&2
+  exit 1
+fi

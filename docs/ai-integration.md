@@ -1,6 +1,6 @@
 # Контракт для AI-участника
 
-AI пока отсутствует. В runtime используется `UnconfiguredEvaluator`, который возвращает 503; фиктивных автоматических оценок нет. Настройка API или локальной модели — следующий этап.
+Для Gemini есть адаптер в `ai/` и инструкция [запуска и разметки](ai-gemini.md). При запуске `backend.main:app` или без API-ключа работает `UnconfiguredEvaluator` либо незадействованный Gemini evaluator и автоматическая оценка возвращает 503; фиктивных автоматических оценок нет.
 
 ## Что реализовать
 
@@ -51,7 +51,7 @@ async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
 
 ## Подключение
 
-Рекомендуемая будущая структура: `ai/adapter.py`, `ai/app.py`, `ai/prompts/`. В `ai/app.py` создать `app = create_app(evaluator=YourEvaluator(...))` и запускать `python -m uvicorn ai.app:app --env-file .env`. После добавления пакета `ai` включить его в `tool.setuptools.packages.find` и зафиксировать новые зависимости. Backend-участник согласует этот небольшой интеграционный коммит.
+Адаптер находится в `ai/gemini.py`; `ai/app.py` создаёт приложение через `create_app(evaluator=GeminiEvaluator(...))`. Для запуска используйте `python -m uvicorn ai.app:app --env-file .env`. Пакет `ai` включён в `pyproject.toml`.
 
 ### Hosted-приложение: frontend и API на одном адресе
 
@@ -64,23 +64,14 @@ async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
 python -m uvicorn backend.hosting:create_hosted_app --factory
 ```
 
-После реализации адаптера AI-участник добавляет свою фабрику, например в
-`ai/app.py` (имена ниже — пример будущего кода, такого модуля сейчас нет):
-
-```python
-from backend.hosting import create_hosted_app
-from ai.adapter import build_evaluator
-
-
-def create_app():
-    # build_evaluator принадлежит AI-участнику и читает его серверную конфигурацию.
-    return create_hosted_app(evaluator=build_evaluator())
-```
+Фабрика `ai.app:create_hosted_app` уже передаёт `GeminiEvaluator` в hosted-приложение.
+Она читает `GEMINI_API_KEY`, `CQA_GEMINI_MODEL`,
+`CQA_GEMINI_THINKING_LEVEL` и `CQA_GEMINI_ALLOW_VOICE_CALLS` при запуске.
 
 Для alwaysdata меняется только цель существующей команды:
 
 ```text
-/home/replimetr/venv/bin/python -m uvicorn ai.app:create_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
+/home/replimetr/venv/bin/python -m uvicorn ai.app:create_hosted_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
 ```
 
 Сохранить все `CQA_*` настройки из [alwaysdata.md](alwaysdata.md). Добавить
@@ -98,7 +89,7 @@ requirements-lock.txt. Имена переменных для ключа/мод�
 Интерфейс допускает как локальный Ollama, так и облачный сервис. Конкретная модель
 и клиент провайдера остаются внутри адаптера; backend не привязан к его HTTP API.
 
-Команда выбрала Gemini API; его клиент и промпт ещё не реализованы. Backend уже
+Команда выбрала Gemini API; клиент и промпт реализованы в ветке AI. Backend уже
 ограничивает параллельность одиночных и пакетных оценок и учитывает каждый запуск.
 Необязательное поле `EvaluatorOutput.usage: ProviderUsage | None` позволяет сообщить
 совокупные токены и число вызовов, включая повторы. `usage.complete=True` означает

@@ -1,8 +1,9 @@
 # Docker и размещение backend
 
 Конфигурация запускает только FastAPI: один Linux-контейнер, один процесс Uvicorn,
-встроенный обработчик пакетов и SQLite в отдельном Docker volume. Frontend и AI
-в образ не входят. API, формула баллов и поведение при отсутствии модели сохраняются.
+встроенный обработчик пакетов и SQLite в отдельном Docker volume. В образ входят
+backend и Gemini-адаптер; frontend обслуживается отдельно. API, формула баллов
+и поведение без ключа сохраняются.
 
 Нужны Docker Engine с Compose **2.30+** на Linux либо запущенный Docker Desktop
 с Linux containers на Windows/macOS. Python на хосте нужен только для необязательных
@@ -11,7 +12,7 @@
 
 ## Быстрый запуск без AI
 
-Из корня репозитория, ветка `codex/backend-core`:
+Из корня репозитория, ветка `main`:
 
 ```text
 docker version
@@ -23,12 +24,14 @@ docker compose ps
 Без `.env.docker` работают настройки по умолчанию. Откройте
 [health](http://127.0.0.1:8000/health) и [Swagger](http://127.0.0.1:8000/docs).
 Ожидается `{"status":"ok","database":"sqlite","ai_configured":false}`.
-Автооценка возвращает `503 AI_NOT_CONFIGURED`; Docker не подключает Gemini.
+Без ключа автооценка возвращает `503 AI_NOT_CONFIGURED`. Для Gemini добавьте
+`GEMINI_API_KEY` и `CQA_GEMINI_MODEL=gemini-3.6-flash` в приватный `.env.docker`.
+Точка входа контейнера — `ai.app:app`; перезапускать с другой командой не нужно.
 
 Образ использует Python 3.12 slim / Debian bookworm и устанавливает только runtime
 зависимости из pyproject с ограничениями requirements-lock.txt. Тег базового образа
 получает обновления Python 3.12; это не фиксация по digest. Новые сборки проверяются CI.
-`.dockerignore` разрешает только исходники backend и нужные ресурсы: `.env`, базы,
+`.dockerignore` разрешает только исходники backend/AI и нужные ресурсы: `.env`, базы,
 резервные копии, Git, frontend и тестовые данные в контекст сборки не попадают.
 
 Контейнер работает от UID/GID `10001`, корневая файловая система доступна только
@@ -70,6 +73,10 @@ chmod 600 .env.docker
 | CQA_AI_CONCURRENCY | 2 параллельных вызова на процесс; это не количество процессов Uvicorn |
 | CQA_BATCH_QUEUE_LIMIT | 1000 элементов очереди |
 | CQA_TARIFFS_PATH | Пусто либо доступный контейнеру путь к JSON тарифов; путь хоста сам по себе не монтируется |
+| GEMINI_API_KEY | Секрет Gemini; пусто оставляет автоматическую оценку отключённой |
+| CQA_GEMINI_MODEL | Модель; в Docker-примере `gemini-3.6-flash` |
+| CQA_GEMINI_FALLBACK_MODEL | Резервная модель; пусто оставляет повторы на основной |
+| CQA_GEMINI_ALLOW_VOICE_CALLS | `0` по умолчанию; `1` разрешает отправку транскриптов звонков |
 
 Обычная `.env` для нативного запуска не передаётся приложению в контейнере.
 Переменная **Compose** `REPLIMETR_PORT` задаёт порт хоста (по умолчанию 8000):

@@ -12,10 +12,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Reject committed API keys
+        run: python -m scripts.check_secrets
       - run: python -m pip install -e ".[dev]" -c requirements-lock.txt
-      - run: python -m ruff check backend scripts tests
-      - run: python -m ruff format --check backend scripts tests
-      - run: python -m mypy backend
+      - run: python -m ruff check backend ai scripts tests
+      - run: python -m ruff format --check backend ai scripts tests
+      - run: python -m mypy backend ai
       - name: Unit tests
         run: python -m pytest tests/unit -q
       - name: Integration tests

@@ -13,7 +13,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1", "pyda
 dev = ["pytest>=8,<10", "ruff>=0.17,<1", "mypy>=2.4,<3"]
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["backend*", "ai*"]
 
 [tool.setuptools.package-data]
 backend = ["default_checklist.json", "schema.sql"]
@@ -31,4 +31,4 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["backend"]
+files = ["backend", "ai"]

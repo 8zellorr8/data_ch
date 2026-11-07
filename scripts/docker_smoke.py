@@ -61,13 +61,14 @@ def prepare_context(directory: Path) -> None:
         "requirements-lock.txt",
     ):
         shutil.copyfile(ROOT / name, directory / name)
-    for path in (ROOT / "backend").rglob("*"):
-        if path.is_file() and (
-            path.suffix == ".py" or path.name in {"schema.sql", "default_checklist.json"}
-        ):
-            target = directory / path.relative_to(ROOT)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(path, target)
+    for package in ("backend", "ai"):
+        for path in (ROOT / package).rglob("*"):
+            if path.is_file() and (
+                path.suffix == ".py" or path.name in {"schema.sql", "default_checklist.json"}
+            ):
+                target = directory / path.relative_to(ROOT)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
     (directory / ".env.docker").write_text(
         "CQA_CORS_ORIGINS=https://frontend.example.invalid\n"
         "CQA_ORGANIZER_API_URL=\nCQA_TARIFFS_PATH=\n"
@@ -122,7 +123,8 @@ def verify(compose: Compose, expected_schema: dict) -> None:
     compose.start()
     print("Container healthy; checking runtime and the manual API scenario...", flush=True)
     compose.python(
-        "import os, sqlite3; from pathlib import Path; "
+        "import os, sqlite3; from pathlib import Path; from ai.app import build_evaluator; "
+        "assert not build_evaluator().configured; "
         "assert os.getuid() == 10001; "
         "assert os.environ['REPLIMETR_LITERAL_TEST'] == 'value$kept#literal'; "
         "assert os.environ['CQA_DATABASE_PATH'] == '/var/lib/replimetr/cqa.sqlite3'; "

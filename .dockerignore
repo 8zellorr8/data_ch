@@ -1,4 +1,4 @@
-# Only backend source and its declared resources enter the build context.
+# Only backend/AI source and declared resources enter the build context.
 **
 !Dockerfile
 !.dockerignore
@@ -9,3 +9,5 @@
 !backend/**/*.py
 !backend/default_checklist.json
 !backend/schema.sql
+!ai/
+!ai/**/*.py
