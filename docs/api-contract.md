@@ -34,6 +34,12 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 | GET | `/api/v1/evaluation-batches` | `{items,total,limit,offset}`; сводки и счётчики статусов, limit 1–100 (20 по умолчанию), offset от 0 |
 | GET | `/api/v1/evaluation-batches/{id}` | Пакет, completed, статусы и ID оценок по каждому элементу |
 | POST | `/api/v1/reports/usage` | Один из evaluation_ids / execution_ids / batch_id → отчёт известного расхода |
+| POST | `/api/v1/evaluation-batches/{id}/cancel` | Без тела → текущий BatchRecord; отменяются только pending |
+| POST | `/api/v1/reports/quality` | Явные пары reference_id/reference_revision/ai_id → QualityReport, без вызова модели |
+
+Без подключённого адаптера `/health` возвращает ai_configured=false, новые запросы
+автооценки/пакета — 503 AI_NOT_CONFIGURED. Импорт JSON, ручные оценки и история
+доступны. Сценарий проверки: [backend-no-ai.md](backend-no-ai.md).
 
 Пагинация: `limit` 1–1000, по умолчанию 100; `offset` от 0. Языки: `RU`, `KZ`, `EN`. Каналы: `agent chat`, `voice call`. В списке диалогов вместо `transcript` приходит `message_count`; остальные поля те же. Все временные отметки исходного транскрипта — строки, без преобразования часового пояса.
 
