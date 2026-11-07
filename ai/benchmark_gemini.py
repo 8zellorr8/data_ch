@@ -17,8 +17,7 @@ from backend.models import ChecklistVersion, Conversation, EvaluationResult
 from backend.rate_limits import RequestLimiter
 from backend.scoring import calculate, validate_result
 
-from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, GeminiEvaluator
-from .prompt import PROMPT_VERSION
+from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, GeminiEvaluator
 
 
 async def benchmark(args: argparse.Namespace) -> dict[str, object]:
@@ -38,8 +37,9 @@ async def benchmark(args: argparse.Namespace) -> dict[str, object]:
     evaluator = GeminiEvaluator(
         key,
         model=os.getenv("CQA_GEMINI_MODEL", DEFAULT_MODEL),
-        fallback_model=os.getenv("CQA_GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL) or None,
-        thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", "low"),
+        fallback_model=os.getenv("CQA_GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL or "") or None,
+        thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", DEFAULT_THINKING_LEVEL),
+        allow_voice_calls=os.getenv("CQA_GEMINI_ALLOW_VOICE_CALLS", "0") == "1",
         timeout=float(os.getenv("CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS", "15")),
         fallback_timeout=float(os.getenv("CQA_GEMINI_FALLBACK_TIMEOUT_SECONDS", "40")),
         request_gate=RequestLimiter(requests_per_minute=float(os.getenv("CQA_GEMINI_RPM", "3"))),
@@ -91,7 +91,7 @@ async def benchmark(args: argparse.Namespace) -> dict[str, object]:
         )
         print(f"{cid}: {output.model}, {elapsed}s, {output.calls} call(s)", flush=True)
     return {
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": evaluator.prompt_version,
         "reference_prompt_version": manifest["prompt_version"],
         "reference_status": manifest["annotation_status_counts"],
         "selected": len(ids),

@@ -25,6 +25,7 @@ class ProxyTests(unittest.TestCase):
                 self.send_response(409)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('X-Execution-ID', 'execution-fixture')
+                self.send_header('Retry-After', '60')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -51,6 +52,7 @@ class ProxyTests(unittest.TestCase):
         response = caught.exception
         self.assertEqual(response.code, 409)
         self.assertEqual(response.headers['X-Execution-ID'], 'execution-fixture')
+        self.assertEqual(response.headers['Retry-After'], '60')
         self.assertEqual(json.load(response)['error']['code'], 'EVALUATION_FAILED')
         response.close()
         self.assertEqual(self.calls, [{'body':body,'key':'same-key','cookie':None}])

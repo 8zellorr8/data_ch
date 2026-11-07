@@ -1,6 +1,7 @@
 """Contract tests for the Gemini boundary; no external API calls."""
 
 import asyncio
+import copy
 import json
 
 import httpx
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from ai.app import create_hosted_app
 from ai.gemini import GeminiEvaluator
+from ai.prompt import build_gemini_prompt, review_requirements
 from backend.errors import DomainError
 from backend.evaluator import EvaluationContext, ProviderDeferred
 from backend.models import ChecklistVersion, Conversation, Message
@@ -22,6 +24,14 @@ def fast_requests(monkeypatch):
     monkeypatch.setattr(
         "ai.gemini.RequestLimiter", lambda: RequestLimiter(requests_per_minute=60000)
     )
+
+
+@pytest.fixture(autouse=True)
+def provider_reference_limitation(answers: dict) -> None:
+    # This evaluator receives no official product reference in EvaluationContext.
+    for answer in answers["answers"]:
+        if answer["criterion_id"] == "consultation":
+            answer.update(needs_review=True, limitation="Product reference not supplied")
 
 
 def make_context(checklist: dict) -> EvaluationContext:
@@ -73,7 +83,7 @@ def test_gemini_returns_valid_contract(checklist: dict, answers: dict) -> None:
             result = await GeminiEvaluator("test-key", client=client).evaluate(
                 make_context(checklist)
             )
-        assert result.model == "gemini-3.8-flash"
+        assert result.model == "gemini-3.5-flash-lite"
         assert result.input_tokens == 100
         assert result.output_tokens == 50
         assert result.usage is not None
@@ -85,6 +95,7 @@ def test_gemini_returns_valid_contract(checklist: dict, answers: dict) -> None:
         assert "Установление контакта" in prompt
         assert captured["generationConfig"]["responseMimeType"] == "application/json"
         assert "responseJsonSchema" in captured["generationConfig"]
+        assert captured["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "medium"
 
     asyncio.run(run())
 
@@ -110,6 +121,48 @@ def test_gemini_rejects_invented_quote(checklist: dict, answers: dict) -> None:
             with pytest.raises(DomainError) as exc:
                 await GeminiEvaluator("test-key", client=client).evaluate(make_context(checklist))
         assert exc.value.code == "AI_INVALID_RESULT"
+
+    asyncio.run(run())
+
+
+def test_gemini_repairs_invalid_quote_with_source_feedback(checklist: dict, answers: dict) -> None:
+    requests = []
+    invalid = copy.deepcopy(answers)
+    invalid["answers"][0]["evidence"][0]["quote"] = "Invented quote"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if len(requests) == 2:
+            feedback = body["contents"][-1]["parts"][0]["text"]
+            assert "Quote does not match" in feedback
+            assert "Здравствуйте, я Анна" in feedback
+            assert "test-key" not in feedback
+        result = invalid if len(requests) == 1 else answers
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(result)}]}}
+                ]
+            },
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            output = await GeminiEvaluator(
+                "test-key", model="gemini-3.5-flash-lite", fallback_model=None, client=client
+            ).evaluate(make_context(checklist))
+        assert output.calls == 2
+        assert output.result.answers[0].evidence[0].quote == "Здравствуйте, я Анна."
+        branches = requests[0]["generationConfig"]["responseJsonSchema"]["properties"]["answers"][
+            "items"
+        ]["anyOf"]
+        for branch in branches:
+            properties = branch["properties"]
+            values = properties["value"]["enum"]
+            evidence_kinds = properties["evidence_kind"]["enum"]
+            assert ("na" in values) == (evidence_kinds == ["not_applicable"])
 
     asyncio.run(run())
 
@@ -150,6 +203,59 @@ def test_gemini_uses_current_custom_checklist(checklist: dict, answers: dict) ->
     asyncio.run(run())
 
 
+def test_gemini_requires_missing_source_limits_for_calls(checklist: dict, answers: dict) -> None:
+    context = make_context(checklist)
+    context.conversation.channel = "voice call"
+    for answer in answers["answers"]:
+        if answer["criterion_id"] == "management":
+            answer.update(needs_review=True, limitation="Transcript only; no audio analyzed")
+    invalid = copy.deepcopy(answers)
+    for answer in invalid["answers"]:
+        if answer["criterion_id"] == "consultation":
+            answer.update(needs_review=False, limitation="")
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if len(requests) == 2:
+            assert "Missing required review flag for consultation" in str(body["contents"])
+        result = invalid if len(requests) == 1 else answers
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(result)}]}}
+                ]
+            },
+        )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            output = await GeminiEvaluator(
+                "test-key", allow_voice_calls=True, client=client
+            ).evaluate(context)
+        assert output.calls == 2
+        assert output.audio_analyzed is False
+        reviewed = {a.criterion_id for a in output.result.answers if a.needs_review}
+        assert {"consultation", "management"} <= reviewed
+
+    asyncio.run(run())
+
+
+def test_modified_rubric_rules_take_priority_over_default_guidance(checklist: dict) -> None:
+    context = make_context(checklist)
+    for criterion in context.checklist.criteria:
+        if criterion.id == "closing":
+            criterion.rule = "Оператор подвёл итог. Прощание не требуется в этом чек-листе."
+        elif criterion.id == "consultation":
+            criterion.rule = "Сравни ответ с официальным FAQ, приведённым в этом критерии."
+    prompt = build_gemini_prompt(context)
+    assert "Прощание не требуется в этом чек-листе" in prompt
+    assert "closing: одного прощания" not in prompt
+    assert "consultation" not in review_requirements(context)
+
+
 @pytest.mark.parametrize("failure", ["timeout", "overloaded"])
 def test_gemini_falls_back_and_reports_actual_model(
     checklist: dict, answers: dict, failure: str
@@ -177,9 +283,12 @@ def test_gemini_falls_back_and_reports_actual_model(
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            result = await GeminiEvaluator("test-key", client=client).evaluate(
-                make_context(checklist)
-            )
+            result = await GeminiEvaluator(
+                "test-key",
+                model="gemini-3.8-flash",
+                fallback_model="gemini-3.6-flash",
+                client=client,
+            ).evaluate(make_context(checklist))
         assert result.model == "gemini-3.6-flash"
         assert result.calls == 2
         assert result.usage is not None
@@ -304,9 +413,12 @@ def test_failed_primary_tokens_are_not_priced_as_fallback(checklist: dict, answe
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            output = await GeminiEvaluator("test-key", client=client).evaluate(
-                make_context(checklist)
-            )
+            output = await GeminiEvaluator(
+                "test-key",
+                model="gemini-3.8-flash",
+                fallback_model="gemini-3.6-flash",
+                client=client,
+            ).evaluate(make_context(checklist))
         assert output.model == "gemini-3.6-flash"
         assert output.calls == 2
         assert output.usage is not None and not output.usage.complete
@@ -423,7 +535,11 @@ def test_every_attempt_including_fallback_passes_request_gate(checklist, answers
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             result = await GeminiEvaluator(
-                "test-key", client=client, request_gate=RecordingGate()
+                "test-key",
+                model="gemini-3.8-flash",
+                fallback_model="gemini-3.6-flash",
+                client=client,
+                request_gate=RecordingGate(),
             ).evaluate(make_context(checklist))
         assert result.calls == 3
         assert models == ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.6-flash"]

@@ -103,6 +103,9 @@ def test_temporary_429_retries_only_failed_item_and_keeps_attempt_usage(settings
 
 def test_gemini_daily_cooldown_survives_restart_and_then_continues(settings, dataset, answers):
     calls = []
+    for answer in answers["answers"]:
+        if answer["criterion_id"] == "consultation":
+            answer.update(needs_review=True, limitation="Product reference not supplied")
 
     def provider(req):
         calls.append(req)

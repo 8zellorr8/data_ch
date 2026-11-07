@@ -19,20 +19,29 @@ def main() -> None:
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--epochs", type=float, default=3)
     parser.add_argument("--grad-accum", type=int, default=2)
+    parser.add_argument("--max-steps", type=int, default=-1)
+    parser.add_argument("--cpu-threads", type=int, default=4)
+    parser.add_argument("--gpu-memory-fraction", type=float, default=0.85)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
     args = parser.parse_args()
     if not args.train.is_file() or not args.validation.is_file():
         parser.error("Build validated labels with 'python -m ai.labels build' first")
     if args.max_length < 512:
         parser.error("--max-length must be at least 512")
-    if args.epochs <= 0 or args.grad_accum < 1:
-        parser.error("--epochs and --grad-accum must be positive")
+    if args.epochs <= 0 or args.grad_accum < 1 or args.cpu_threads < 1:
+        parser.error("--epochs, --grad-accum and --cpu-threads must be positive")
+    if not 0 < args.gpu_memory_fraction <= 1 or args.max_steps == 0 or args.max_steps < -1:
+        parser.error("Invalid memory fraction or maximum step count")
 
     try:
         import torch  # type: ignore[import-not-found]
         from datasets import load_dataset  # type: ignore[import-not-found]
         from peft import LoraConfig, TaskType, get_peft_model  # type: ignore[import-not-found]
-        from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore[import-not-found]
+        from transformers import (  # type: ignore[import-not-found]
+            AutoModelForCausalLM,
+            AutoTokenizer,
+            set_seed,
+        )
         from trl import SFTConfig, SFTTrainer  # type: ignore[import-not-found]
     except ImportError as exc:
         parser.error(f"Install optional LoRA dependencies first: {exc.name}")
@@ -40,7 +49,14 @@ def main() -> None:
     if use_cuda and not torch.cuda.is_available():
         parser.error("CUDA was requested but this PyTorch build cannot use it")
     device = "cuda" if use_cuda else "cpu"
-    print(f"Training on {device}")
+    torch.set_num_threads(args.cpu_threads)
+    if use_cuda:
+        torch.cuda.set_per_process_memory_fraction(args.gpu_memory_fraction)
+        torch.set_float32_matmul_precision("high")
+    set_seed(42)
+    use_bf16 = use_cuda and torch.cuda.is_bf16_supported()
+    dtype = torch.bfloat16 if use_bf16 else torch.float16 if use_cuda else torch.float32
+    print(f"Training on {device}, dtype={dtype}", flush=True)
 
     data = load_dataset(
         "json",
@@ -67,7 +83,7 @@ def main() -> None:
                 )
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch.float16 if use_cuda else torch.float32
+        args.model, dtype=dtype, attn_implementation="sdpa"
     )
     model.config.use_cache = False
     model = get_peft_model(
@@ -92,21 +108,30 @@ def main() -> None:
             per_device_eval_batch_size=1,
             gradient_accumulation_steps=args.grad_accum,
             num_train_epochs=args.epochs,
+            max_steps=args.max_steps,
             learning_rate=1e-4,
             max_length=args.max_length,
             completion_only_loss=True,
             gradient_checkpointing=True,
-            fp16=use_cuda,
+            fp16=use_cuda and not use_bf16,
+            bf16=use_bf16,
+            tf32=use_cuda,
             use_cpu=not use_cuda,
             eval_strategy="epoch",
             save_strategy="epoch",
             save_total_limit=2,
-            logging_steps=10,
+            logging_steps=1,
+            logging_first_step=True,
+            prediction_loss_only=True,
+            dataloader_pin_memory=use_cuda,
             optim="adamw_torch",
             report_to="none",
         ),
     )
-    trainer.train()
+    baseline = trainer.evaluate(metric_key_prefix="baseline")
+    training = trainer.train()
+    final = trainer.evaluate(metric_key_prefix="final")
+    trainer.save_state()
     trainer.model.save_pretrained(args.output / "adapter")
     tokenizer.save_pretrained(args.output / "adapter")
     manifest = {
@@ -120,6 +145,12 @@ def main() -> None:
         "epochs": args.epochs,
         "gradient_accumulation_steps": args.grad_accum,
         "device": device,
+        "gpu": torch.cuda.get_device_name(0) if use_cuda else None,
+        "gpu_memory_fraction": args.gpu_memory_fraction if use_cuda else None,
+        "dtype": str(dtype),
+        "max_steps": args.max_steps,
+        "optimizer_steps": trainer.state.global_step,
+        "metrics": {"baseline": baseline, "train": training.metrics, "final": final},
     }
     labels_manifest = args.train.parent / "manifest.json"
     if labels_manifest.is_file():

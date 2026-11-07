@@ -11,6 +11,8 @@ const reasons = {
   BATCH_CANCELLED_BEFORE_START: 'Отменено до запуска',
   AI_NOT_CONFIGURED: 'Модель не подключена', AI_INVALID_RESULT: 'Ответ модели не прошёл проверку',
   AI_TIMEOUT: 'Истекло время ожидания модели', AI_UNAVAILABLE: 'Модель недоступна',
+  AI_RATE_LIMITED: 'Лимит частоты запросов модели',
+  AI_QUOTA_EXHAUSTED: 'Квота модели исчерпана',
   EVALUATION_INTERRUPTED: 'Обработка прервана на сервере', WORKER_INTERRUPTED: 'Обработчик остановлен',
 };
 

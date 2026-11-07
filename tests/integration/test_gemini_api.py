@@ -27,7 +27,7 @@ def test_custom_rubric_single_replay_and_batch(settings, dataset, language, chan
     def respond(request):
         body = json.loads(request.content)
         prompt = body["contents"][0]["parts"][0]["text"]
-        inputs = json.loads(prompt.split("ДАННЫЕ:\n", 1)[1])
+        inputs, _ = json.JSONDecoder().raw_decode(prompt.split("ДАННЫЕ:\n", 1)[1])
         assert inputs["language"] == language and inputs["channel"] == channel
         assert [c["id"] for c in inputs["checklist"]["criteria"]] == ["custom_quality"]
         if channel == "voice call":

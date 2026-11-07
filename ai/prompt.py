@@ -1,13 +1,37 @@
 """Prompt and structured output schema for conversation quality evaluation."""
 
 import json
+from functools import lru_cache
+from importlib.resources import files
+from typing import cast
 
 from backend.evaluator import EvaluationContext
+from backend.models import Criterion
 
 PROMPT_VERSION = "cqa-gemini-v5"
+GEMINI_PROMPT_VERSION = f"{PROMPT_VERSION}:calibration-v2"
 
 
-def response_schema(criterion_ids: list[str]) -> dict[str, object]:
+@lru_cache(maxsize=1)
+def _default_criteria() -> dict[str, dict[str, object]]:
+    definition = json.loads(files("backend").joinpath("default_checklist.json").read_text("utf-8"))
+    return {criterion["id"]: criterion for criterion in definition["criteria"]}
+
+
+def _matches_default(criterion: Criterion) -> bool:
+    original = _default_criteria().get(criterion.id)
+    return original is not None and all(
+        getattr(criterion, field) == original[field]
+        for field in ("type", "rule", "call_rule", "allow_na", "na_rule", "scale")
+    )
+
+
+def response_schema(
+    criterion_ids: list[str],
+    *,
+    criteria: list[Criterion] | None = None,
+    required_review_ids: set[str] | None = None,
+) -> dict[str, object]:
     answer = {
         "type": "object",
         "properties": {
@@ -18,7 +42,7 @@ def response_schema(criterion_ids: list[str]) -> dict[str, object]:
                     {"type": "number"},
                 ]
             },
-            "explanation": {"type": "string"},
+            "explanation": {"type": "string", "minLength": 1},
             "evidence_kind": {
                 "type": "string",
                 "enum": ["present", "missing", "not_applicable"],
@@ -52,6 +76,41 @@ def response_schema(criterion_ids: list[str]) -> dict[str, object]:
         ],
         "additionalProperties": False,
     }
+    items: dict[str, object] = answer
+    if criteria is not None:
+        branches = []
+        common = cast(dict[str, object], answer["properties"])
+        for criterion in criteria:
+            properties = {
+                **common,
+                "criterion_id": {"type": "string", "enum": [criterion.id]},
+                "value": (
+                    {"type": "number", "enum": criterion.scale}
+                    if criterion.type == "scale"
+                    else {"type": "string", "enum": ["yes", "no"]}
+                ),
+                "evidence_kind": {"type": "string", "enum": ["present", "missing"]},
+                "na_reason": {"type": "string", "enum": [""]},
+            }
+            if criterion.id in (required_review_ids or set()):
+                properties.update(
+                    needs_review={"type": "boolean", "enum": [True]},
+                    limitation={"type": "string", "minLength": 1},
+                )
+            branches.append({**answer, "properties": properties})
+            if criterion.allow_na:
+                branches.append(
+                    {
+                        **answer,
+                        "properties": {
+                            **properties,
+                            "value": {"type": "string", "enum": ["na"]},
+                            "evidence_kind": {"type": "string", "enum": ["not_applicable"]},
+                            "na_reason": {"type": "string", "minLength": 1},
+                        },
+                    }
+                )
+        items = branches[0] if len(branches) == 1 else {"anyOf": branches}
     return {
         "type": "object",
         "properties": {
@@ -59,7 +118,7 @@ def response_schema(criterion_ids: list[str]) -> dict[str, object]:
                 "type": "array",
                 "minItems": len(criterion_ids),
                 "maxItems": len(criterion_ids),
-                "items": answer,
+                "items": items,
             }
         },
         "required": ["answers"],
@@ -149,3 +208,63 @@ def build_prompt(context: EvaluationContext) -> str:
         "Не вычисляй общий балл: его посчитает сервер. Верни только JSON.\n\n"
         "ДАННЫЕ:\n" + json.dumps(task, ensure_ascii=False, separators=(",", ":"))
     )
+
+
+def review_requirements(context: EvaluationContext) -> dict[str, str]:
+    """Expose missing sources for the default rubric, without changing rubric values."""
+    required = {}
+    for criterion in context.checklist.criteria:
+        if not _matches_default(criterion):
+            continue
+        rule = (criterion.rule + " " + criterion.call_rule).lower()
+        if criterion.id == "consultation" and "справочника" in rule:
+            required[criterion.id] = (
+                "Официальный справочник брокера не передан в контексте. "
+                "Полноту ответа оцени по диалогу; достоверность продуктовых правил, "
+                "тарифов и сроков нельзя подтвердить только словами оператора. "
+                "Не объявляй эти факты проверенными. Отметь необходимость проверки "
+                "фактической корректности по официальному источнику. Это не основание для N/A."
+            )
+        if (
+            criterion.id == "management"
+            and context.conversation.channel == "voice call"
+            and "без аудио" in rule
+        ):
+            required[criterion.id] = (
+                "Обработан только текст транскрипта; аудио не анализировалось. "
+                "Темп, дикцию, произношение и длительность пауз по аудио проверить нельзя. "
+                "Оцени только наблюдаемое в тексте и укажи это ограничение; "
+                "возможные ошибки ASR не приписывай оператору."
+            )
+    return required
+
+
+def build_gemini_prompt(context: EvaluationContext) -> str:
+    """Clarify default rubric distinctions without adding reference labels to the prompt."""
+    guidance = []
+    for criterion in context.checklist.criteria:
+        if not _matches_default(criterion):
+            continue
+        if criterion.id == "needs" and criterion.allow_na and "самого начала" in criterion.na_rule:
+            guidance.append(
+                "needs: если исходного контекста уже хватало для ответа, ставь na, а не yes. "
+                "yes требует нужного уточняющего вопроса оператора до ответа. "
+                "Не считай само предоставление инструкции выявлением потребности."
+            )
+        if criterion.id == "closing" and "подвёл итог" in criterion.rule:
+            guidance.append(
+                "closing: одного прощания и вежливости недостаточно. "
+                "Фразы «пожалуйста», «рад помочь», «happy to help», «you're welcome» "
+                "не являются предложением дальнейшей помощи. Для yes нужен конкретный "
+                "итог решённого вопроса либо явный вопрос о дополнительных вопросах/помощи, "
+                "а также прощание. «Отлично» без конкретного итога недостаточно."
+            )
+    review = review_requirements(context)
+    if review:
+        guidance.append(
+            "Для перечисленных критериев обязательно needs_review=true и непустое limitation "
+            "с конкретным ограничением источника. Балл отражает наблюдаемое по тексту; "
+            "не выдавай непроверенные факты за подтверждённые:\n"
+            + json.dumps(review, ensure_ascii=False)
+        )
+    return build_prompt(context) + "\n\nУточнения к переданным правилам:\n" + "\n".join(guidance)

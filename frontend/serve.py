@@ -76,7 +76,7 @@ class FrontendHandler(SimpleHTTPRequestHandler):
             with response:
                 body = response.read()
                 self.send_response(response.status)
-                for name in ('Content-Type', 'X-Request-ID', 'X-Execution-ID'):
+                for name in ('Content-Type', 'X-Request-ID', 'X-Execution-ID', 'Retry-After'):
                     if response.headers.get(name):
                         self.send_header(name, response.headers[name])
                 self.send_header('Content-Length', str(len(body)))
