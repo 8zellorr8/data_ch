@@ -129,11 +129,16 @@ def prepare(
     return len(selected)
 
 
-def build(drafts_dir: Path, out_dir: Path, allow_provisional: bool = False) -> tuple[int, int]:
+def build(
+    drafts_dir: Path,
+    out_dir: Path,
+    allow_provisional: bool = False,
+    per_criterion: bool = False,
+) -> tuple[int, int]:
     paths = sorted(drafts_dir.glob("*.json"))
     if not paths:
         raise ValueError("No annotation drafts found")
-    groups: dict[str, list[tuple[str, SFTExample]]] = defaultdict(list)
+    groups: dict[str, list[tuple[str, list[SFTExample], list[str]]]] = defaultdict(list)
     status_counts: dict[str, int] = defaultdict(int)
     for path in paths:
         try:
@@ -150,33 +155,57 @@ def build(drafts_dir: Path, out_dir: Path, allow_provisional: bool = False) -> t
         except (KeyError, TypeError, ValueError, InvalidEvaluationResult) as exc:
             # Pydantic errors may contain private transcript snippets; omit them.
             raise ValueError(f"Incomplete or invalid annotation in {path.name}") from exc
-        groups[context.conversation.language].append(
-            (
-                context.conversation.conversation_id,
+        bundles = []
+        criterion_ids = []
+        selections = (
+            [[criterion] for criterion in context.checklist.criteria]
+            if per_criterion
+            else [context.checklist.criteria]
+        )
+        for selection in selections:
+            selected_ids = {criterion.id for criterion in selection}
+            selected_context = EvaluationContext(
+                context.conversation, context.checklist.model_copy(update={"criteria": selection})
+            )
+            selected_result = EvaluationResult(
+                answers=[answer for answer in result.answers if answer.criterion_id in selected_ids]
+            )
+            bundles.append(
                 {
-                    "prompt": [{"role": "user", "content": build_prompt(context)}],
+                    "prompt": [{"role": "user", "content": build_prompt(selected_context)}],
                     "completion": [
                         {
                             "role": "assistant",
-                            "content": result.model_dump_json(exclude_defaults=False),
+                            "content": selected_result.model_dump_json(exclude_defaults=False),
                         }
                     ],
-                },
+                }
             )
+            criterion_ids.append(selection[0].id if per_criterion else "")
+        groups[context.conversation.language].append(
+            (context.conversation.conversation_id, bundles, criterion_ids)
         )
         status_counts[status] += 1
     train: list[SFTExample] = []
     validation: list[SFTExample] = []
     train_ids: list[str] = []
     validation_ids: list[str] = []
+    train_row_ids: list[str] = []
+    validation_row_ids: list[str] = []
+    train_criterion_ids: list[str] = []
+    validation_criterion_ids: list[str] = []
     for language in sorted(groups):
-        for index, (cid, example) in enumerate(groups[language]):
+        for index, (cid, examples, criterion_ids) in enumerate(groups[language]):
             if index % 5 == 4:
-                validation.append(example)
+                validation.extend(examples)
                 validation_ids.append(cid)
+                validation_row_ids.extend([cid] * len(examples))
+                validation_criterion_ids.extend(criterion_ids)
             else:
-                train.append(example)
+                train.extend(examples)
                 train_ids.append(cid)
+                train_row_ids.extend([cid] * len(examples))
+                train_criterion_ids.extend(criterion_ids)
     if not validation:
         raise ValueError("At least five labeled chats in one language are needed for a holdout")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -194,6 +223,11 @@ def build(drafts_dir: Path, out_dir: Path, allow_provisional: bool = False) -> t
                 "validation_examples": len(validation),
                 "train_conversation_ids": train_ids,
                 "validation_conversation_ids": validation_ids,
+                "example_format": "criterion" if per_criterion else "full_checklist",
+                "train_example_conversation_ids": train_row_ids,
+                "validation_example_conversation_ids": validation_row_ids,
+                "train_criterion_ids": train_criterion_ids,
+                "validation_criterion_ids": validation_criterion_ids,
             },
             indent=2,
         )
@@ -216,6 +250,11 @@ def main() -> None:
     build_cmd.add_argument("--drafts", type=Path, default=Path("data/labels/drafts"))
     build_cmd.add_argument("--out", type=Path, default=Path("data/labels/sft"))
     build_cmd.add_argument(
+        "--per-criterion",
+        action="store_true",
+        help="One criterion per example; split by whole chat",
+    )
+    build_cmd.add_argument(
         "--allow-provisional",
         action="store_true",
         help="Experimental training with unreviewed labels",
@@ -226,7 +265,9 @@ def main() -> None:
             count = prepare(args.source, args.out, args.per_language, args.seed, args.ids)
             print(f"Created {count} annotation drafts in {args.out}")
         else:
-            train, validation = build(args.drafts, args.out, args.allow_provisional)
+            train, validation = build(
+                args.drafts, args.out, args.allow_provisional, args.per_criterion
+            )
             print(f"Validated {train} train and {validation} validation examples in {args.out}")
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
