@@ -31,7 +31,7 @@ from .models import (
     OrganizerImport,
     Page,
 )
-from .reports import usage_report
+from .reports import ComparisonManifest, QualityReport, QualityReportService, usage_report
 from .services import AppealService, EvaluationService, ImportService
 from .value_types import Channel, Language
 from .work_models import (
@@ -55,6 +55,7 @@ class ApplicationServices:
     batches: BatchService
     work_store: WorkStore
     tariffs: tuple[Tariff, ...]
+    quality: QualityReportService
 
 
 def get_services(request: Request) -> ApplicationServices:
@@ -215,3 +216,13 @@ def get_batch(batch_id: str, services: Services) -> BatchRecord:
 def report_usage(payload: UsageSelection, services: Services) -> UsageReport:
     records, missing, pending = services.work_store.get_usage(payload)
     return usage_report(records, missing, pending, services.tariffs)
+
+
+@router.post("/api/v1/evaluation-batches/{batch_id}/cancel", tags=["batches"])
+def cancel_batch(batch_id: str, services: Services) -> BatchRecord:
+    return services.batches.cancel(batch_id)
+
+
+@router.post("/api/v1/reports/quality", tags=["reports"])
+def report_quality(payload: ComparisonManifest, services: Services) -> QualityReport:
+    return services.quality.generate(payload)

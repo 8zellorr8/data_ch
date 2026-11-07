@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .db import Repository
-from .reports import ComparisonManifest, compare_evaluations
+from .reports import ComparisonManifest, QualityReportService
 
 
 def main() -> None:
@@ -20,10 +20,8 @@ def main() -> None:
     if args.output.resolve() in {args.database.resolve(), args.manifest.resolve()}:
         parser.error("Output must differ from database and manifest")
     manifest = ComparisonManifest.model_validate_json(args.manifest.read_text(encoding="utf-8"))
-    ids = {p.reference_id for p in manifest.pairs} | {p.ai_id for p in manifest.pairs if p.ai_id}
     repository = Repository(args.database)
-    records = repository.get_evaluation_selection(ids)
-    report = compare_evaluations(manifest, records)
+    report = QualityReportService(repository).generate(manifest)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     print(report.purpose)

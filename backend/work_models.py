@@ -95,6 +95,7 @@ class UsageRecord(Contract):
     error_code: str | None = None
     duration_ms: int | None = None
     usage: ProviderUsage | None = None
+    provider_not_called: bool = False
 
 
 class UsageSelection(Contract):

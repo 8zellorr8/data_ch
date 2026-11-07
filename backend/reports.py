@@ -1,10 +1,11 @@
-"""Pure comparison and cost calculations; these functions never call a model."""
+"""Snapshot comparison service and pure report calculations; no model calls."""
 
 from decimal import Decimal
 
 from pydantic import Field, model_validator
 
 from .models import AIModelMetadata, Contract, EvaluationRecord
+from .ports import QualityReportStore
 from .work_models import (
     PositiveInt,
     SafeId,
@@ -67,6 +68,17 @@ class QualityReport(Contract):
     mae: Decimal | None
     criteria: list[CriterionMetric]
     pairs: list[PairOutcome]
+
+
+class QualityReportService:
+    def __init__(self, store: QualityReportStore) -> None:
+        self.store = store
+
+    def generate(self, manifest: ComparisonManifest) -> QualityReport:
+        ids = {p.reference_id for p in manifest.pairs} | {
+            p.ai_id for p in manifest.pairs if p.ai_id
+        }
+        return compare_evaluations(manifest, self.store.get_evaluation_selection(ids))
 
 
 def compare_evaluations(
@@ -157,6 +169,17 @@ def usage_report(
     rows: list[UsageLine] = []
     totals: dict[str, Decimal] = {}
     for record in records:
+        if record.provider_not_called:
+            rows.append(
+                UsageLine(
+                    execution=record,
+                    tariff=None,
+                    known_cost=Decimal(0),
+                    complete=True,
+                    limitations=[],
+                )
+            )
+            continue
         usage = record.usage
         tariff = by_model.get(usage.model) if usage else None
         limitations: list[str] = []
@@ -202,7 +225,9 @@ def usage_report(
         duration_complete=coverage_complete and all(r.duration_ms is not None for r in records),
         known_calls=sum(r.usage.calls for r in records if r.usage),
         calls_complete=coverage_complete
-        and all(r.usage is not None and r.usage.complete for r in records),
+        and all(
+            r.provider_not_called or (r.usage is not None and r.usage.complete) for r in records
+        ),
         known_input_tokens=sum(
             r.usage.input_tokens for r in records if r.usage and r.usage.input_tokens is not None
         ),
@@ -211,10 +236,13 @@ def usage_report(
         ),
         tokens_complete=coverage_complete
         and all(
-            r.usage is not None
-            and r.usage.complete
-            and r.usage.input_tokens is not None
-            and r.usage.output_tokens is not None
+            r.provider_not_called
+            or (
+                r.usage is not None
+                and r.usage.complete
+                and r.usage.input_tokens is not None
+                and r.usage.output_tokens is not None
+            )
             for r in records
         ),
         missing_ids=missing,

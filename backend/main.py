@@ -18,6 +18,7 @@ from .http import BodyLimitMiddleware, UnexpectedErrorMiddleware, install_error_
 from .observability import RequestDiagnosticsMiddleware, configure_logging
 from .organizer import MAX_BYTES, OrganizerClient
 from .ports import DatasetSource
+from .reports import QualityReportService
 from .services import AppealService, EvaluationService, ImportService
 from .work_store import WorkStore
 
@@ -54,6 +55,7 @@ def create_app(
         batches=batches,
         work_store=work_store,
         tariffs=settings.tariffs,
+        quality=QualityReportService(repository),
     )
 
     @asynccontextmanager

@@ -337,6 +337,21 @@ class WorkStore:
         with self.repository.connection() as conn:
             return self._batch(conn, batch_id)
 
+    def cancel_pending(self, batch_id: str) -> BatchRecord:
+        # claim() uses the same BEGIN IMMEDIATE lock. Only one of cancellation
+        # or claiming can win for a pending item; running items are never touched.
+        with self.repository.connection(write=True) as conn:
+            if not conn.execute(
+                "SELECT 1 FROM evaluation_batches WHERE id=?", (batch_id,)
+            ).fetchone():
+                raise DomainError("NOT_FOUND", "Batch not found")
+            conn.execute(
+                "UPDATE batch_items SET status='interrupted',error_code='BATCH_CANCELLED_BEFORE_START' "
+                "WHERE batch_id=? AND status='pending'",
+                (batch_id,),
+            )
+            return self._batch(conn, batch_id)
+
     def claim(self, owner: str, now: float) -> ClaimedItem | None:
         with self.repository.connection(write=True) as conn:
             self._active(conn, owner, now)
@@ -410,8 +425,27 @@ class WorkStore:
                     )
                 }
                 missing = [
-                    i.id for i in batch.items if i.id not in found_items and i.status != "pending"
+                    i.id
+                    for i in batch.items
+                    if i.id not in found_items
+                    and i.status != "pending"
+                    and i.error_code != "BATCH_CANCELLED_BEFORE_START"
                 ]
+                records.extend(
+                    UsageRecord(
+                        id="cancelled-before-start:" + i.id,
+                        batch_id=batch.id,
+                        conversation_id=i.conversation_id,
+                        status="interrupted",
+                        error_code=i.error_code,
+                        duration_ms=0,
+                        provider_not_called=True,
+                    )
+                    for i in batch.items
+                    if i.id not in found_items
+                    and i.status == "interrupted"
+                    and i.error_code == "BATCH_CANCELLED_BEFORE_START"
+                )
             elif selection.evaluation_ids:
                 found = {r.evaluation_id for r in records}
                 for evaluation_id in selection.evaluation_ids:

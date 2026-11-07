@@ -143,3 +143,20 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 Сервер поддерживает сохранённые пакетные задания через `/evaluation-batches`; существующие одиночные запросы продолжают работать. POST создания AI/ручной оценки принимает необязательный `Idempotency-Key`. Ответы содержат `X-Request-ID`, а после резервирования AI-запуска также `X-Execution-ID`. Новые ошибки: 503 AI_BUSY/BATCH_QUEUE_FULL и 409 IDEMPOTENCY_CONFLICT/EVALUATION_IN_PROGRESS/EVALUATION_FAILED/EVALUATION_INTERRUPTED. Формат ошибки прежний. Полные примеры, повторные запросы, восстановление и отчёты: [backend-operations.md](backend-operations.md).
 
 Конфликт `REVISION_CONFLICT` возможен и при открытии апелляции, если оценка изменилась между чтением и записью. Для успешного решения `revision` увеличивается ровно на один. При сбое записи решение и изменение балла откатываются вместе.
+
+## Отмена и отчёт качества
+
+| Маршрут | Запрос | Успешный ответ |
+| --- | --- | --- |
+| POST `/api/v1/evaluation-batches/{batch_id}/cancel` | Без тела | 200 BatchRecord, только pending становятся interrupted/BATCH_CANCELLED_BEFORE_START |
+| POST `/api/v1/reports/quality` | ComparisonManifest: 1–1000 явных пар reference_id, reference_revision, ai_id | 200 QualityReport, включая причины исключения несовместимых пар |
+
+Running-вызов отмена не прерывает. Неизвестный batch_id — 404 NOT_FOUND; повтор
+отмены безопасен. UsageRecord расширен необязательным provider_not_called=false;
+true означает доказанный ноль для отмены до запуска. Новый статус не добавляется.
+
+Отчёт качества использует исходную AI-оценку, актуальную ручную оценку ровно
+запрошенной ревизии и один снимок SQLite. Старая ревизия исключается с причиной,
+не заменяется автоматически. Транскриптов в отчёте нет; модель не вызывается.
+Метрики внутренние, не официальная формула рейтинга. Подробные поля и примеры —
+[backend-operations.md](backend-operations.md), [запросы для UI](../examples/frontend/backend-operations.http).

@@ -45,6 +45,9 @@ class BatchService:
     def list(self, limit: int = 20, offset: int = 0) -> Page[BatchSummary]:
         return self.store.list_batches(limit, offset)
 
+    def cancel(self, batch_id: str) -> BatchRecord:
+        return self.store.cancel_pending(batch_id)
+
     async def consume(self) -> None:
         while not self._stopping:
             self.wake.clear()
