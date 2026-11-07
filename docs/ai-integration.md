@@ -64,23 +64,14 @@ async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
 python -m uvicorn backend.hosting:create_hosted_app --factory
 ```
 
-После реализации адаптера AI-участник добавляет свою фабрику, например в
-`ai/app.py` (имена ниже — пример будущего кода, такого модуля сейчас нет):
-
-```python
-from backend.hosting import create_hosted_app
-from ai.adapter import build_evaluator
-
-
-def create_app():
-    # build_evaluator принадлежит AI-участнику и читает его серверную конфигурацию.
-    return create_hosted_app(evaluator=build_evaluator())
-```
+Фабрика `ai.app:create_hosted_app` уже передаёт `GeminiEvaluator` в hosted-приложение.
+Она читает `GEMINI_API_KEY`, `CQA_GEMINI_MODEL`,
+`CQA_GEMINI_THINKING_LEVEL` и `CQA_GEMINI_ALLOW_VOICE_CALLS` при запуске.
 
 Для alwaysdata меняется только цель существующей команды:
 
 ```text
-/home/replimetr/venv/bin/python -m uvicorn ai.app:create_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
+/home/replimetr/venv/bin/python -m uvicorn ai.app:create_hosted_app --factory --host :: --port 8100 --workers 1 --no-access-log --timeout-graceful-shutdown 200
 ```
 
 Сохранить все `CQA_*` настройки из [alwaysdata.md](alwaysdata.md). Добавить

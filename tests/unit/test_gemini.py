@@ -5,7 +5,9 @@ import json
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
+from ai.app import create_hosted_app
 from ai.gemini import GeminiEvaluator
 from backend.errors import DomainError
 from backend.evaluator import EvaluationContext
@@ -107,3 +109,17 @@ def test_voice_call_requires_explicit_opt_in(checklist: dict) -> None:
     with pytest.raises(DomainError) as exc:
         asyncio.run(GeminiEvaluator("test-key").evaluate(context))
     assert exc.value.code == "AI_NOT_CONFIGURED"
+
+
+def test_hosted_factory_uses_gemini_configuration(monkeypatch, tmp_path) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("hosted test", encoding="utf-8")
+    monkeypatch.setenv("CQA_FRONTEND_PATH", str(frontend))
+    monkeypatch.setenv("CQA_DATABASE_PATH", str(tmp_path / "private.sqlite3"))
+    monkeypatch.delenv("CQA_BACKUP_DIRECTORY", raising=False)
+    monkeypatch.setenv("CQA_REQUIRE_LOCAL_SQLITE", "0")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    with TestClient(create_hosted_app()) as client:
+        assert client.get("/health").json()["ai_configured"] is True
+        assert client.get("/").text == "hosted test"
