@@ -23,6 +23,12 @@ ErrorCode = (
         "ORGANIZER_INVALID_RESPONSE",
         "ORGANIZER_UNAVAILABLE",
         "DATASET_TOO_LARGE",
+        "AI_BUSY",
+        "IDEMPOTENCY_CONFLICT",
+        "EVALUATION_IN_PROGRESS",
+        "EVALUATION_INTERRUPTED",
+        "EVALUATION_FAILED",
+        "BATCH_QUEUE_FULL",
     ]
     | EvaluationErrorCode
 )

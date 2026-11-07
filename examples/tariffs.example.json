@@ -1,0 +1,11 @@
+[
+  {
+    "model": "EXAMPLE_MODEL_NOT_A_REAL_TARIFF",
+    "currency": "USD",
+    "version": "synthetic-example-v1",
+    "effective_date": "2026-01-01",
+    "token_unit": 1000000,
+    "input_price": "0.10",
+    "output_price": "0.30"
+  }
+]

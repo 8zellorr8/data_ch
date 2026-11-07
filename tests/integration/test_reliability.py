@@ -208,10 +208,11 @@ def test_model_success_does_not_disguise_storage_failure(
 
     app = create_app(settings, ValidEvaluator())
 
-    def unavailable(record):
+    def unavailable(*args, **kwargs):
         raise DomainError("STORAGE_BUSY", "Storage is busy")
 
-    monkeypatch.setattr(app.state.repository, "insert_evaluation", unavailable)
+    # AI records and execution status now share one atomic storage operation.
+    monkeypatch.setattr(app.state.services.work_store, "complete", unavailable)
     with TestClient(app) as client:
         response = client.post("/api/v1/evaluations", json={"conversation_id": conversation["id"]})
     assert response.status_code == 503

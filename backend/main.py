@@ -3,19 +3,23 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import ApplicationServices, router
+from .batches import BatchService, ExecutionRuntime
 from .config import Settings
 from .db import Repository
 from .evaluator import Evaluator, UnconfiguredEvaluator
+from .execution import AdmissionLimit, EvaluationCoordinator
 from .http import BodyLimitMiddleware, UnexpectedErrorMiddleware, install_error_handlers
-from .observability import configure_logging
+from .observability import RequestDiagnosticsMiddleware, configure_logging
 from .organizer import MAX_BYTES, OrganizerClient
 from .ports import DatasetSource
 from .services import AppealService, EvaluationService, ImportService
+from .work_store import WorkStore
 
 
 def create_app(
@@ -33,17 +37,33 @@ def create_app(
         if dataset_source is not None
         else OrganizerClient(settings.organizer_api_url)
     )
+    work_store = WorkStore(repository)
+    evaluation_service = EvaluationService(repository, evaluator, settings.evaluation_timeout)
+    owner = str(uuid4())
+    coordinator = EvaluationCoordinator(
+        evaluation_service, work_store, owner, AdmissionLimit(settings.ai_concurrency)
+    )
+    batches = BatchService(coordinator, work_store, settings.batch_queue_limit)
+    runtime = ExecutionRuntime(batches, work_store, owner, settings.owner_lease_seconds)
     services = ApplicationServices(
         repository=repository,
-        evaluations=EvaluationService(repository, evaluator, settings.evaluation_timeout),
+        evaluations=evaluation_service,
         appeals=AppealService(repository),
         imports=ImportService(repository, source),
+        coordinator=coordinator,
+        batches=batches,
+        work_store=work_store,
+        tariffs=settings.tariffs,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.to_thread(repository.initialize)
-        yield
+        await runtime.start()
+        try:
+            yield
+        finally:
+            await runtime.close()
 
     app = FastAPI(
         title="CQA Backend",
@@ -62,8 +82,10 @@ def create_app(
         allow_origins=list(settings.cors_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Idempotency-Key", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Execution-ID"],
     )
+    app.add_middleware(RequestDiagnosticsMiddleware)
     install_error_handlers(app)
     app.include_router(router)
     return app

@@ -30,6 +30,9 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 | POST | `/api/v1/evaluations/{id}/appeals` | `{criterion_id, comment, author}` → апелляция, 201 |
 | POST | `/api/v1/appeals/{id}/decision` | Решение → обновлённая полная оценка |
 | GET | `/api/v1/datasets/{id}/export` | `{schema_version, exported_at, dataset, conversations, evaluations}` |
+| POST | `/api/v1/evaluation-batches` | `{conversation_ids, checklist_id, checklist_version}` → пакет, 201 |
+| GET | `/api/v1/evaluation-batches/{id}` | Пакет, completed, статусы и ID оценок по каждому элементу |
+| POST | `/api/v1/reports/usage` | Один из evaluation_ids / execution_ids / batch_id → отчёт известного расхода |
 
 Пагинация: `limit` 1–1000, по умолчанию 100; `offset` от 0. Языки: `RU`, `KZ`, `EN`. Каналы: `agent chat`, `voice call`. В списке диалогов вместо `transcript` приходит `message_count`; остальные поля те же. Все временные отметки исходного транскрипта — строки, без преобразования часового пояса.
 
@@ -136,6 +139,6 @@ Base URL: `http://127.0.0.1:8000`. Все запросы и ответы — JSO
 | 502 | `AI_UNAVAILABLE`, `AI_INVALID_RESULT`, ошибки организаторов | Показать неудачную попытку, не создавать успешный результат |
 | 504 | `AI_TIMEOUT` | Сообщить о тайм-ауте модели |
 
-Пакетная оценка пока организуется в frontend последовательными вызовами `/evaluations` с прогрессом и отдельным статусом каждого диалога. Серверного фонового задания и дедупликации повторных запросов нет.
+Сервер поддерживает сохранённые пакетные задания через `/evaluation-batches`; существующие одиночные запросы продолжают работать. POST создания AI/ручной оценки принимает необязательный `Idempotency-Key`. Ответы содержат `X-Request-ID`, а после резервирования AI-запуска также `X-Execution-ID`. Новые ошибки: 503 AI_BUSY/BATCH_QUEUE_FULL и 409 IDEMPOTENCY_CONFLICT/EVALUATION_IN_PROGRESS/EVALUATION_FAILED/EVALUATION_INTERRUPTED. Формат ошибки прежний. Полные примеры, повторные запросы, восстановление и отчёты: [backend-operations.md](backend-operations.md).
 
 Конфликт `REVISION_CONFLICT` возможен и при открытии апелляции, если оценка изменилась между чтением и записью. Для успешного решения `revision` увеличивается ровно на один. При сбое записи решение и изменение балла откатываются вместе.
