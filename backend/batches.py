@@ -21,6 +21,13 @@ class BatchService:
     ) -> None:
         self.coordinator, self.store, self.queue_limit = coordinator, store, queue_limit
         self.wake = asyncio.Event()
+        self._stopping = False
+
+    def stop(self) -> None:
+        # Cancellation can race with a completed wait; never rely on it alone
+        # to stop a long-lived consumer from starting its next iteration.
+        self._stopping = True
+        self.wake.set()
 
     async def create(self, request: BatchRequest, key: str | None = None) -> BatchRecord:
         key_hash = hashlib.sha256(key.encode()).hexdigest() if key else None
@@ -39,7 +46,7 @@ class BatchService:
         return self.store.list_batches(limit, offset)
 
     async def consume(self) -> None:
-        while True:
+        while not self._stopping:
             self.wake.clear()
             try:
                 if self.coordinator.service.evaluator.configured:
@@ -69,7 +76,8 @@ class BatchService:
             except DomainError as exc:
                 logger.warning("Batch storage temporarily unavailable (%s)", exc.code)
             try:
-                await asyncio.wait_for(self.wake.wait(), timeout=1)
+                async with asyncio.timeout(1):
+                    await self.wake.wait()
             except TimeoutError:
                 pass
 
@@ -94,10 +102,12 @@ class ExecutionRuntime:
             except DomainError as exc:
                 logger.error("Execution heartbeat failed (%s)", exc.code)
                 if exc.code == "EVALUATION_INTERRUPTED":
+                    self.batches.stop()
                     self.tasks[0].cancel()
                     return
 
     async def close(self) -> None:
+        self.batches.stop()
         for task in self.tasks:
             task.cancel()
         results = await asyncio.gather(*self.tasks, return_exceptions=True)

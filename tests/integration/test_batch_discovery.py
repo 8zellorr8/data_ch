@@ -230,3 +230,49 @@ def test_invalid_batch_idempotency_key_is_rejected_before_creation(client, conve
     )
     assert response.status_code == 422
     assert client.get("/api/v1/evaluation-batches").json()["total"] == 0
+
+
+def test_batch_shutdown_exits_even_if_a_wait_swallows_cancellation(client):
+    from backend.batches import BatchService, ExecutionRuntime
+
+    async def scenario():
+        entered = asyncio.Event()
+
+        class RacyWake:
+            waits = 0
+
+            def clear(self):
+                pass
+
+            def set(self):
+                pass
+
+            async def wait(self):
+                self.waits += 1
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    if self.waits == 1:
+                        return True  # Simulate completion winning the cancellation race.
+                    raise
+
+        class Owners:
+            closed = False
+
+            def close_owner(self, owner, now):
+                self.closed = True
+
+        services = client.app.state.services
+        consumer = BatchService(services.coordinator, services.work_store, 100)
+        wake = RacyWake()
+        consumer.wake = wake
+        owners = Owners()
+        runtime = ExecutionRuntime(consumer, owners, "test-owner", 30)
+        runtime.tasks = [asyncio.create_task(consumer.consume())]
+        await asyncio.wait_for(entered.wait(), 1)
+        async with asyncio.timeout(1):
+            await runtime.close()
+        assert owners.closed and runtime.tasks[0].done() and wake.waits == 1
+
+    asyncio.run(scenario())

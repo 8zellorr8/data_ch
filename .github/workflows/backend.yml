@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       matrix:
         python-version: ['3.11', '3.12']
@@ -18,4 +19,4 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/unit -q
       - name: Integration tests
-        run: python -m pytest tests/integration -q
+        run: python -m pytest tests/integration -q -o faulthandler_timeout=30
