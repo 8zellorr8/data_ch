@@ -68,7 +68,7 @@ def create_app(
             await runtime.close()
 
     app = FastAPI(
-        title="CQA Backend",
+        title="Replimetr API",
         version="0.2.0",
         lifespan=lifespan,
         description="Backend contract for the frontend and AI teammates. AI is not connected by default.",

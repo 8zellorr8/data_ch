@@ -1,9 +1,9 @@
 {
-  "name": "ketnavr-frontend",
+  "name": "replimetr-frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Ketnavr frontend for the existing FastAPI backend. No build or dependencies required.",
+  "description": "Replimetr frontend for the existing FastAPI backend. No build or dependencies required.",
   "scripts": {
     "start": "python -m http.server 5173 --bind 127.0.0.1",
     "check": "node --check app.js && node --check api.js && node --check ui.js && node --check checklists.js && node --check review.js"
