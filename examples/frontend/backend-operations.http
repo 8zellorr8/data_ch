@@ -1,0 +1,30 @@
+# Request examples only; these IDs must be explicitly selected from your own test data.
+@baseUrl = http://127.0.0.1:8000
+@batchId = REPLACE_WITH_BATCH_ID
+@referenceId = REPLACE_WITH_MANUAL_ID
+@referenceRevision = 1
+@aiId = REPLACE_WITH_AI_ID
+
+### Cancel waiting items only. Repeat is safe; running calls continue.
+POST {{baseUrl}}/api/v1/evaluation-batches/{{batchId}}/cancel
+
+### Read current progress; creation replay returns the original acceptance snapshot.
+GET {{baseUrl}}/api/v1/evaluation-batches/{{batchId}}
+
+### Actual calls and known zero usage for canceled-before-start items.
+POST {{baseUrl}}/api/v1/reports/usage
+Content-Type: application/json
+
+{"batch_id":"{{batchId}}"}
+
+### Internal quality metrics; no model call. Use null for a missing AI result.
+POST {{baseUrl}}/api/v1/reports/quality
+Content-Type: application/json
+
+{
+  "pairs": [{
+    "reference_id": "{{referenceId}}",
+    "reference_revision": {{referenceRevision}},
+    "ai_id": "{{aiId}}"
+  }]
+}

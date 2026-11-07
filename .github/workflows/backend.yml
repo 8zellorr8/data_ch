@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       matrix:
         python-version: ['3.11', '3.12']
@@ -18,4 +19,15 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/unit -q
       - name: Integration tests
-        run: python -m pytest tests/integration -q
+        run: python -m pytest tests/integration -q -o faulthandler_timeout=30
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]" -c requirements-lock.txt
+      - name: Docker startup, API compatibility and SQLite persistence
+        run: python -m scripts.docker_smoke

@@ -3,9 +3,11 @@
 from dataclasses import dataclass
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, Path, Query, Request
 
+from .batches import BatchService
 from .db import Repository
+from .execution import EvaluationCoordinator
 from .http import ErrorResponse
 from .models import (
     AppealDecision,
@@ -29,8 +31,19 @@ from .models import (
     OrganizerImport,
     Page,
 )
+from .reports import ComparisonManifest, QualityReport, QualityReportService, usage_report
 from .services import AppealService, EvaluationService, ImportService
+from .submission import SubmissionDocument, SubmissionRequest, SubmissionService
 from .value_types import Channel, Language
+from .work_models import (
+    BatchRecord,
+    BatchRequest,
+    BatchSummary,
+    Tariff,
+    UsageReport,
+    UsageSelection,
+)
+from .work_store import WorkStore
 
 
 @dataclass(frozen=True)
@@ -39,6 +52,12 @@ class ApplicationServices:
     evaluations: EvaluationService
     appeals: AppealService
     imports: ImportService
+    coordinator: EvaluationCoordinator
+    batches: BatchService
+    work_store: WorkStore
+    tariffs: tuple[Tariff, ...]
+    quality: QualityReportService
+    submission: SubmissionService
 
 
 def get_services(request: Request) -> ApplicationServices:
@@ -48,6 +67,10 @@ def get_services(request: Request) -> ApplicationServices:
 Services = Annotated[ApplicationServices, Depends(get_services)]
 Limit = Annotated[int, Query(ge=1, le=1000)]
 Offset = Annotated[int, Query(ge=0)]
+IdempotencyKey = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
+]
 router = APIRouter(
     responses={
         status: {"model": ErrorResponse} for status in (400, 404, 409, 413, 422, 500, 502, 503, 504)
@@ -124,13 +147,21 @@ def add_checklist_version(
 
 
 @router.post("/api/v1/evaluations", status_code=201, tags=["evaluations"])
-async def evaluate(payload: EvaluationRequest, services: Services) -> EvaluationRecord:
-    return await services.evaluations.evaluate(payload)
+async def evaluate(
+    payload: EvaluationRequest,
+    services: Services,
+    idempotency_key: IdempotencyKey = None,
+) -> EvaluationRecord:
+    return await services.coordinator.evaluate(payload, idempotency_key)
 
 
 @router.post("/api/v1/evaluations/manual", status_code=201, tags=["evaluations"])
-def manual_evaluation(payload: ManualEvaluationRequest, services: Services) -> EvaluationRecord:
-    return services.evaluations.evaluate_manual(payload)
+def manual_evaluation(
+    payload: ManualEvaluationRequest,
+    services: Services,
+    idempotency_key: IdempotencyKey = None,
+) -> EvaluationRecord:
+    return services.coordinator.manual(payload, idempotency_key)
 
 
 @router.get("/api/v1/evaluations/{evaluation_id}", tags=["evaluations"])
@@ -158,3 +189,49 @@ def decide(appeal_id: str, payload: AppealDecision, services: Services) -> Evalu
 @router.get("/api/v1/datasets/{dataset_id}/export", tags=["export"])
 def export(dataset_id: str, services: Services) -> DatasetExport:
     return services.repository.export_dataset(dataset_id)
+
+
+@router.post("/api/v1/evaluation-batches", status_code=201, tags=["batches"])
+async def create_batch(
+    payload: BatchRequest,
+    services: Services,
+    idempotency_key: IdempotencyKey = None,
+) -> BatchRecord:
+    return await services.batches.create(payload, idempotency_key)
+
+
+@router.get("/api/v1/evaluation-batches", tags=["batches"])
+def list_batches(
+    services: Services,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+) -> Page[BatchSummary]:
+    return services.batches.list(limit, offset)
+
+
+@router.get("/api/v1/evaluation-batches/{batch_id}", tags=["batches"])
+def get_batch(batch_id: str, services: Services) -> BatchRecord:
+    return services.work_store.get_batch(batch_id)
+
+
+@router.post("/api/v1/reports/usage", tags=["reports"])
+def report_usage(payload: UsageSelection, services: Services) -> UsageReport:
+    records, missing, pending = services.work_store.get_usage(payload)
+    return usage_report(records, missing, pending, services.tariffs)
+
+
+@router.post("/api/v1/evaluation-batches/{batch_id}/cancel", tags=["batches"])
+def cancel_batch(batch_id: str, services: Services) -> BatchRecord:
+    return services.batches.cancel(batch_id)
+
+
+@router.post("/api/v1/reports/quality", tags=["reports"])
+def report_quality(payload: ComparisonManifest, services: Services) -> QualityReport:
+    return services.quality.generate(payload)
+
+
+@router.post("/api/v1/datasets/{dataset_id}/submission", tags=["export"])
+def submission(
+    dataset_id: str, payload: SubmissionRequest, services: Services
+) -> SubmissionDocument:
+    return services.submission.generate(dataset_id, payload)

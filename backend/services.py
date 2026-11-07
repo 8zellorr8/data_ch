@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from time import perf_counter
 from uuid import uuid4
 
 from pydantic import ValidationError
 
+from .async_utils import durable_thread
 from .clock import utc_now
 from .domain import new_appeal, new_evaluation, resolve_appeal
 from .errors import DomainError, InvalidEvaluationResult
@@ -25,6 +27,7 @@ from .models import (
     OrganizerImport,
 )
 from .ports import AppealStore, DatasetSource, DatasetStore, EvaluationStore
+from .work_models import ProviderUsage
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +38,20 @@ class EvaluationService:
         self.evaluator = evaluator
         self.timeout = timeout
 
-    def _context(self, request: EvaluationRequest) -> EvaluationContext:
+    def context_for(self, request: EvaluationRequest) -> EvaluationContext:
         return EvaluationContext(
             self.store.get_conversation(request.conversation_id),
             self.store.get_checklist(request.checklist_id, request.checklist_version),
         )
 
-    async def evaluate(self, request: EvaluationRequest) -> EvaluationRecord:
-        context = await asyncio.to_thread(self._context, request)
+    async def evaluate(
+        self,
+        request: EvaluationRequest,
+        *,
+        commit: Callable[[EvaluationRecord], EvaluationRecord] | None = None,
+        report_usage: Callable[[ProviderUsage], None] | None = None,
+    ) -> EvaluationRecord:
+        context = await asyncio.to_thread(self.context_for, request)
         # A provider may mutate Pydantic objects. Never expose the audit snapshots.
         provider_context = EvaluationContext(
             context.conversation.model_copy(deep=True), context.checklist.model_copy(deep=True)
@@ -65,10 +74,26 @@ class EvaluationService:
             ) from None
         # Only provider validation errors map to AI_INVALID_RESULT. Storage errors
         # propagate separately and must never be misreported as a model failure.
+        if isinstance(output, EvaluatorOutput):
+            try:
+                usage = (
+                    ProviderUsage.model_validate(output.usage)
+                    if output.usage
+                    else ProviderUsage(
+                        model=output.model,
+                        calls=output.calls,
+                        input_tokens=output.input_tokens,
+                        output_tokens=output.output_tokens,
+                    )
+                )
+                if report_usage:
+                    report_usage(usage)
+            except ValidationError:
+                raise DomainError("AI_INVALID_RESULT", "Invalid usage metadata") from None
         record = await asyncio.to_thread(
             self._prepare, context, output, round((perf_counter() - started) * 1000)
         )
-        return await asyncio.to_thread(self.store.insert_evaluation, record)
+        return await durable_thread(commit or self.store.insert_evaluation, record)
 
     @staticmethod
     def _prepare(context: EvaluationContext, output: object, duration_ms: int) -> EvaluationRecord:
@@ -104,8 +129,13 @@ class EvaluationService:
         except InvalidEvaluationResult:
             raise DomainError("AI_INVALID_RESULT", invalid_result_message) from None
 
-    def evaluate_manual(self, request: ManualEvaluationRequest) -> EvaluationRecord:
-        context = self._context(request)
+    def evaluate_manual(
+        self,
+        request: ManualEvaluationRequest,
+        *,
+        commit: Callable[[EvaluationRecord], EvaluationRecord] | None = None,
+    ) -> EvaluationRecord:
+        context = self.context_for(request)
         record = new_evaluation(
             context.conversation,
             context.checklist,
@@ -114,7 +144,7 @@ class EvaluationService:
             record_id=str(uuid4()),
             created_at=utc_now(),
         )
-        return self.store.insert_evaluation(record)
+        return (commit or self.store.insert_evaluation)(record)
 
 
 class AppealService:

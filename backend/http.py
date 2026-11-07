@@ -10,6 +10,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .errors import DomainError, ErrorCode
 from .models import Contract
+from .observability import error_code_context
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,13 @@ ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     "ORGANIZER_INVALID_RESPONSE": 502,
     "ORGANIZER_UNAVAILABLE": 502,
     "DATASET_TOO_LARGE": 413,
+    "AI_BUSY": 503,
+    "IDEMPOTENCY_CONFLICT": 409,
+    "EVALUATION_IN_PROGRESS": 409,
+    "EVALUATION_INTERRUPTED": 409,
+    "EVALUATION_FAILED": 409,
+    "BATCH_QUEUE_FULL": 503,
+    "INVALID_SUBMISSION": 422,
 }
 
 
@@ -56,6 +64,7 @@ class ErrorResponse(Contract):
 
 
 def error_response(code: str, message: str, status: int) -> JSONResponse:
+    error_code_context.set(code)
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
 
 
@@ -126,6 +135,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        error_code_context.set("VALIDATION_ERROR")
         details = [
             {"location": list(e["loc"]), "message": e["msg"], "type": e["type"]}
             for e in exc.errors()

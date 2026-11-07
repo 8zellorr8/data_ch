@@ -288,25 +288,30 @@ class Repository:
 
     def insert_evaluation(self, record: EvaluationRecord) -> EvaluationRecord:
         with self.connection(write=True) as conn:
-            conn.execute(
-                """
+            self.write_evaluation(conn, record)
+        return record
+
+    @staticmethod
+    def write_evaluation(conn: sqlite3.Connection, record: EvaluationRecord) -> None:
+        """Shared insert for ordinary writes and atomic execution completion."""
+        conn.execute(
+            """
                 INSERT INTO evaluations
                     (id, conversation_id, checklist_id, checklist_version,
                      origin, revision, created_at, body)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    record.id,
-                    record.conversation_id,
-                    record.checklist.checklist_id,
-                    record.checklist.version,
-                    record.origin,
-                    record.revision,
-                    record.created_at,
-                    record.model_dump_json(exclude={"appeals"}),
-                ),
-            )
-        return record
+            (
+                record.id,
+                record.conversation_id,
+                record.checklist.checklist_id,
+                record.checklist.version,
+                record.origin,
+                record.revision,
+                record.created_at,
+                record.model_dump_json(exclude={"appeals"}),
+            ),
+        )
 
     @staticmethod
     def _get_evaluation(conn: sqlite3.Connection, evaluation_id: str) -> EvaluationRecord:
@@ -326,6 +331,17 @@ class Repository:
     def get_evaluation(self, evaluation_id: str) -> EvaluationRecord:
         with self.connection() as conn:
             return self._get_evaluation(conn, evaluation_id)
+
+    def get_evaluation_selection(self, ids: set[str]) -> dict[str, EvaluationRecord]:
+        """One snapshot for a benchmark, including current manual revisions."""
+        with self.connection() as conn:
+            result = {}
+            for evaluation_id in sorted(ids):
+                if conn.execute(
+                    "SELECT 1 FROM evaluations WHERE id=?", (evaluation_id,)
+                ).fetchone():
+                    result[evaluation_id] = self._get_evaluation(conn, evaluation_id)
+            return result
 
     def list_evaluations(
         self, conversation_id: str, limit: int = 100, offset: int = 0

@@ -1,0 +1,35 @@
+# Stable project name keeps the same volume when the checkout directory changes.
+name: replimetr
+
+services:
+  backend:
+    build: .
+    init: true
+    restart: unless-stopped
+    # The public HTTPS proxy belongs on the host; the raw API stays on loopback.
+    ports:
+      - "127.0.0.1:${REPLIMETR_PORT:-8000}:8000"
+    env_file:
+      - path: .env.docker
+        required: false
+        # Signed URLs and future credentials must retain literal $ characters.
+        format: raw
+    volumes:
+      - backend-data:/var/lib/replimetr
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Longer than Uvicorn's HTTP drain timeout, with time left for SQLite cleanup.
+    stop_grace_period: 240s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  backend-data:
