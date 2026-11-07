@@ -183,7 +183,7 @@ docker compose up --detach --wait --wait-timeout 120
    [Docker Engine и Compose](https://docs.docker.com/engine/install/).
    Docker должен запускаться после перезагрузки ОС. Автозапуск процесса контейнера
    задан в Compose; он не заменяет автозапуск самого Docker.
-2. Клонируйте приватный репозиторий своим GitHub-доступом, без токена в URL/командах:
+2. Клонируйте репозиторий, без токена в URL/командах:
    `git clone --single-branch --branch codex/backend-core https://github.com/8zellorr8/data_ch.git`.
    Перейдите в `data_ch` и выполните быстрый запуск выше.
 3. Проверьте `curl --fail http://127.0.0.1:8000/health` на сервере. Для личной проверки
@@ -213,3 +213,9 @@ AI ограничьте доступ на reverse proxy/VPN/шлюзе иден�
 
 Справка: [Docker volumes](https://docs.docker.com/engine/storage/volumes/),
 [Compose env_file и параметры сервиса](https://docs.docker.com/reference/compose-file/services/).
+
+## Текущий бесплатный хостинг
+
+Replimetr опубликован на alwaysdata нативно, через User program, без Docker.
+Фактические пути, запуск на HTTP host с локальным XFS, запрет открывать живую
+WAL-базу с SSH host и проверенный порядок восстановления: [alwaysdata.md](alwaysdata.md).

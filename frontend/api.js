@@ -1,4 +1,5 @@
-const DEFAULT_BASE = 'http://127.0.0.1:8000';
+const DEFAULT_BASE = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+  ? 'http://127.0.0.1:8000' : location.origin;
 export function getApiBase() { return localStorage.getItem('cqa-api-base') || DEFAULT_BASE; }
 export function setApiBase(value) {
   const url = new URL(value);
