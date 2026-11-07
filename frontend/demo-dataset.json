@@ -1,0 +1,65 @@
+{
+  "name": "Учебный пример · искусственные диалоги",
+  "group_id": "EXAMPLE",
+  "records": [
+    {
+      "conversation_id": "DEMO-RU-001",
+      "language": "RU",
+      "channel": "agent chat",
+      "transcript": [
+        {"timestamp":"10:24:00","speaker":"client","text":"Здравствуйте! Где найти инструкцию по приложению? Не могу разобраться."},
+        {"timestamp":"10:24:08","speaker":"operator","text":"Здравствуйте! Меня зовут Анна. Понимаю, что в новом приложении бывает непросто сориентироваться. Подскажите, какой раздел вас интересует?"},
+        {"timestamp":"10:24:27","speaker":"client","text":"Мне нужна общая инструкция для начала работы."},
+        {"timestamp":"10:24:38","speaker":"operator","text":"Общая инструкция находится в разделе «Помощь». Откройте меню приложения, затем «Помощь» и «Начало работы»."},
+        {"timestamp":"10:25:01","speaker":"client","text":"Нашёл, спасибо!"},
+        {"timestamp":"10:25:09","speaker":"operator","text":"Рада помочь! Мы нашли инструкцию в разделе «Помощь». Могу ещё чем-нибудь помочь?"},
+        {"timestamp":"10:25:16","speaker":"client","text":"Нет, это всё."},
+        {"timestamp":"10:25:21","speaker":"operator","text":"Спасибо за обращение. До свидания!"}
+      ],
+      "audio_url": null
+    },
+    {
+      "conversation_id": "DEMO-KZ-002",
+      "language": "KZ",
+      "channel": "agent chat",
+      "transcript": [
+        {"timestamp":"11:10:00","speaker":"client","text":"Сәлеметсіз бе! Қолданбаның нұсқаулығын қайдан табуға болады?"},
+        {"timestamp":"11:10:15","speaker":"operator","text":"Сәлеметсіз бе! Менің атым Айдана. Нұсқаулықты қолданбадағы «Көмек» бөлімінен таба аласыз."},
+        {"timestamp":"11:10:38","speaker":"client","text":"Таптым, рақмет!"},
+        {"timestamp":"11:10:47","speaker":"operator","text":"Сізге тағы қандай көмек қажет?"},
+        {"timestamp":"11:10:58","speaker":"client","text":"Басқа сұрағым жоқ."},
+        {"timestamp":"11:11:05","speaker":"operator","text":"Хабарласқаныңызға рақмет. Сау болыңыз!"}
+      ],
+      "audio_url": null
+    },
+    {
+      "conversation_id": "DEMO-EN-003",
+      "language": "EN",
+      "channel": "agent chat",
+      "transcript": [
+        {"timestamp":"12:03:00","speaker":"client","text":"Hi, I cannot find the user guide."},
+        {"timestamp":"12:03:12","speaker":"operator","text":"Hello! My name is Alex. You can find the user guide in the Help section of the app."},
+        {"timestamp":"12:03:40","speaker":"client","text":"Thank you, I found it."},
+        {"timestamp":"12:03:55","speaker":"operator","text":"You are welcome. Is there anything else I can help you with?"},
+        {"timestamp":"12:04:03","speaker":"client","text":"No, thanks."},
+        {"timestamp":"12:04:10","speaker":"operator","text":"Thank you for contacting us. Goodbye!"}
+      ],
+      "audio_url": null
+    },
+    {
+      "conversation_id": "DEMO-CALL-004",
+      "language": "RU",
+      "channel": "voice call",
+      "transcript": [
+        {"timestamp":"2026-01-01T13:00:00+05:00","speaker":"operator","text":"Здравствуйте! Меня зовут Алексей. Чем могу помочь?"},
+        {"timestamp":"2026-01-01T13:00:10+05:00","speaker":"client","text":"Где найти инструкцию?"},
+        {"timestamp":"2026-01-01T13:00:17+05:00","speaker":"operator","text":"В меню приложения откройте раздел «Помощь», затем «Начало работы»."},
+        {"timestamp":"2026-01-01T13:00:34+05:00","speaker":"client","text":"Спасибо, всё понятно."},
+        {"timestamp":"2026-01-01T13:00:40+05:00","speaker":"operator","text":"Могу ещё чем-нибудь помочь?"},
+        {"timestamp":"2026-01-01T13:00:46+05:00","speaker":"client","text":"Нет."},
+        {"timestamp":"2026-01-01T13:00:50+05:00","speaker":"operator","text":"Спасибо за звонок, до свидания!"}
+      ],
+      "audio_url": null
+    }
+  ]
+}
