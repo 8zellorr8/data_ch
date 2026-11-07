@@ -1,9 +1,11 @@
 """Import a local JSON file without putting organizer URLs into browser code."""
+
 import argparse
 import json
 from pathlib import Path
 
 import httpx
+
 from backend.models import DatasetImport
 
 
@@ -21,13 +23,19 @@ def main():
                 parser.error("The organizer response was unsuccessful")
             raw = {"name": args.name, "group_id": args.group_id, "records": raw["data"]["records"]}
         dataset = DatasetImport.model_validate(raw)
-        response = httpx.post(args.api.rstrip("/") + "/api/v1/datasets", json=dataset.model_dump(), timeout=60)
+        response = httpx.post(
+            args.api.rstrip("/") + "/api/v1/datasets", json=dataset.model_dump(), timeout=60
+        )
         if response.status_code != 201:
-            parser.error(f"Import failed (HTTP {response.status_code}); inspect server/API validation")
+            parser.error(
+                f"Import failed (HTTP {response.status_code}); inspect server/API validation"
+            )
         print(json.dumps(response.json(), ensure_ascii=False, indent=2))
     except (OSError, ValueError, KeyError, TypeError, httpx.RequestError) as exc:
         # Validation exceptions can include real transcript text; keep CLI errors concise.
-        parser.error(f"Unable to import ({type(exc).__name__}); check file format and server availability")
+        parser.error(
+            f"Unable to import ({type(exc).__name__}); check file format and server availability"
+        )
 
 
 if __name__ == "__main__":

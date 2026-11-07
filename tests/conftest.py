@@ -21,13 +21,29 @@ def client(settings):
 @pytest.fixture
 def dataset():
     # Entirely synthetic test input, unrelated to organizer conversations.
-    return {"name": "Synthetic", "group_id": "TEST", "records": [{
-        "conversation_id": "synthetic-1", "language": "RU", "channel": "agent chat",
-        "transcript": [
-            {"timestamp": "09:00:00", "speaker": "client", "text": "Здравствуйте! Где инструкция?"},
-            {"timestamp": "09:00:03", "speaker": "operator", "text": "Здравствуйте, я Анна. Инструкция в разделе Помощь. До свидания!"},
+    return {
+        "name": "Synthetic",
+        "group_id": "TEST",
+        "records": [
+            {
+                "conversation_id": "synthetic-1",
+                "language": "RU",
+                "channel": "agent chat",
+                "transcript": [
+                    {
+                        "timestamp": "09:00:00",
+                        "speaker": "client",
+                        "text": "Здравствуйте! Где инструкция?",
+                    },
+                    {
+                        "timestamp": "09:00:03",
+                        "speaker": "operator",
+                        "text": "Здравствуйте, я Анна. Инструкция в разделе Помощь. До свидания!",
+                    },
+                ],
+            }
         ],
-    }]}
+    }
 
 
 @pytest.fixture
@@ -46,18 +62,33 @@ def checklist(client):
 
 @pytest.fixture
 def answers(checklist):
-    return {"answers": [{
-        "criterion_id": c["id"],
-        "value": max(c["scale"]) if c["type"] == "scale" else "no" if c["type"] == "flag" else "yes",
-        "explanation": "Synthetic test annotation.", "evidence_kind": "present",
-        "evidence": [{"message_id": "m2", "quote": "Здравствуйте, я Анна."}],
-    } for c in checklist["criteria"]]}
+    return {
+        "answers": [
+            {
+                "criterion_id": c["id"],
+                "value": max(c["scale"])
+                if c["type"] == "scale"
+                else "no"
+                if c["type"] == "flag"
+                else "yes",
+                "explanation": "Synthetic test annotation.",
+                "evidence_kind": "present",
+                "evidence": [{"message_id": "m2", "quote": "Здравствуйте, я Анна."}],
+            }
+            for c in checklist["criteria"]
+        ]
+    }
 
 
 @pytest.fixture
 def evaluation(client, conversation, answers):
-    response = client.post("/api/v1/evaluations/manual", json={
-        "conversation_id": conversation["id"], "author": "test-reviewer", "result": answers,
-    })
+    response = client.post(
+        "/api/v1/evaluations/manual",
+        json={
+            "conversation_id": conversation["id"],
+            "author": "test-reviewer",
+            "result": answers,
+        },
+    )
     assert response.status_code == 201, response.text
     return response.json()

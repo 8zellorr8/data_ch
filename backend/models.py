@@ -1,7 +1,16 @@
-from typing import Annotated, Literal
 from math import isfinite
+from typing import Annotated, Generic, Literal, Self, TypeVar
 from urllib.parse import urlsplit
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator, model_validator
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 Text = Annotated[str, Field(min_length=1, max_length=100_000)]
 Identifier = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")]
@@ -9,7 +18,7 @@ AnswerValue = Literal["yes", "no", "na"] | StrictInt | StrictFloat
 
 
 class Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, revalidate_instances="always")
 
 
 class MessageInput(Contract):
@@ -31,10 +40,15 @@ class ConversationInput(Contract):
 
     @field_validator("audio_url")
     @classmethod
-    def valid_audio(cls, value):
+    def valid_audio(cls, value: str | None) -> str | None:
         if value:
             parsed = urlsplit(value)
-            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+            ):
                 raise ValueError("audio_url must be an HTTP(S) URL without credentials")
         return value or None
 
@@ -55,7 +69,7 @@ class DatasetImport(Contract):
     records: Annotated[list[ConversationInput], Field(min_length=1, max_length=1000)]
 
     @model_validator(mode="after")
-    def unique_ids(self):
+    def unique_ids(self) -> Self:
         ids = [c.conversation_id for c in self.records]
         if len(set(ids)) != len(ids):
             raise ValueError("conversation_id must be unique inside a dataset")
@@ -80,7 +94,7 @@ class Criterion(Contract):
     scale: list[StrictInt | StrictFloat] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
-    def valid_definition(self):
+    def valid_definition(self) -> Self:
         if not self.name.strip() or not self.rule.strip():
             raise ValueError("name and rule must not be blank")
         if self.allow_na and not self.na_rule.strip():
@@ -88,8 +102,16 @@ class Criterion(Contract):
         if self.type == "flag" and self.weight != 0:
             raise ValueError("flag criteria must have zero weight")
         if self.type == "scale":
-            if len(self.scale) < 2 or not all(isfinite(v) for v in self.scale) or min(self.scale) != 0 or max(self.scale) <= 0 or len(set(self.scale)) != len(self.scale):
-                raise ValueError("scale must contain unique nonnegative steps including 0 and a positive maximum")
+            if (
+                len(self.scale) < 2
+                or not all(isfinite(v) for v in self.scale)
+                or min(self.scale) != 0
+                or max(self.scale) <= 0
+                or len(set(self.scale)) != len(self.scale)
+            ):
+                raise ValueError(
+                    "scale must contain unique nonnegative steps including 0 and a positive maximum"
+                )
         elif self.scale:
             raise ValueError("only scale criteria can define scale steps")
         return self
@@ -101,7 +123,9 @@ class ChecklistDefinition(Contract):
     criteria: Annotated[list[Criterion], Field(min_length=1, max_length=40)]
 
     @model_validator(mode="after")
-    def unique_criteria(self):
+    def unique_criteria(self) -> Self:
+        if not self.name.strip():
+            raise ValueError("name must not be blank")
         ids = [c.id for c in self.criteria]
         if len(set(ids)) != len(ids):
             raise ValueError("criterion ids must be unique")
@@ -166,7 +190,157 @@ class AppealDecision(Contract):
 
     @field_validator("reason", "reviewer")
     @classmethod
-    def not_blank(cls, value):
+    def not_blank(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("must not be blank")
         return value
+
+
+class CriterionScore(Contract):
+    criterion_id: str
+    value: AnswerValue
+    base_weight: float
+    raw_points: float
+    points: float
+    effective_weight: float
+
+
+class SectionScore(Contract):
+    name: str
+    total: float | None
+
+
+class Score(Contract):
+    total: float | None
+    earned: float
+    applicable_weight: float
+    flags: list[str]
+    criteria: list[CriterionScore]
+    sections: list[SectionScore]
+
+
+class AIModelMetadata(Contract):
+    model: Annotated[str, Field(min_length=1, max_length=200)]
+    prompt_version: Annotated[str, Field(min_length=1, max_length=200)]
+    input_tokens: Annotated[int, Field(strict=True, ge=0)] | None = None
+    output_tokens: Annotated[int, Field(strict=True, ge=0)] | None = None
+    calls: Annotated[int, Field(strict=True, ge=1)] = 1
+    audio_analyzed: Annotated[bool, Field(strict=True)] = False
+    duration_ms: Annotated[int, Field(strict=True, ge=0)]
+
+    @field_validator("model", "prompt_version")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+
+class ManualMetadata(Contract):
+    author: str
+    audio_analyzed: bool = False
+
+
+class ReviewRecord(Contract):
+    appeal_id: str
+    criterion_id: str
+    previous_value: AnswerValue
+    value: AnswerValue
+    reason: str
+    reviewer: str
+    evidence_kind: Literal["present", "missing", "not_applicable"]
+    evidence: list[Evidence]
+    created_at: str
+
+
+class AppealRecord(Contract):
+    id: str
+    evaluation_id: str
+    criterion_id: str
+    comment: str
+    author: str
+    status: Literal["open", "resolved"]
+    opened_revision: int
+    created_at: str
+    decision: ReviewRecord | None = None
+
+
+class EvaluationRecord(Contract):
+    id: str
+    conversation_id: str
+    origin: Literal["ai", "manual"]
+    revision: int
+    created_at: str
+    conversation: Conversation
+    checklist: ChecklistVersion
+    input_hash: str
+    original: EvaluationResult
+    final: EvaluationResult
+    original_score: Score
+    score: Score
+    metadata: AIModelMetadata | ManualMetadata
+    reviews: list[ReviewRecord] = Field(default_factory=list)
+    appeals: list[AppealRecord] = Field(default_factory=list)
+
+
+class DatasetInfo(Contract):
+    id: str
+    name: str
+    group_id: str
+    created_at: str
+
+
+class DatasetSummary(DatasetInfo):
+    count: int
+
+
+class ConversationSummary(Contract):
+    id: str
+    dataset_id: str
+    conversation_id: str
+    language: Literal["RU", "KZ", "EN"]
+    channel: Literal["agent chat", "voice call"]
+    audio_url: str | None
+    message_count: int
+
+
+class ChecklistSummary(Contract):
+    checklist_id: str
+    version: int
+    name: str
+    created_at: str
+
+
+class EvaluationSummary(Contract):
+    id: str
+    origin: Literal["ai", "manual"]
+    revision: int
+    created_at: str
+    score: float | None
+
+
+Item = TypeVar("Item")
+
+
+class Items(Contract, Generic[Item]):
+    items: list[Item]
+
+
+class Page(Items[Item], Generic[Item]):
+    total: int
+    limit: int
+    offset: int
+
+
+class DatasetExport(Contract):
+    schema_version: Literal[1] = 1
+    exported_at: str
+    dataset: DatasetInfo
+    conversations: list[Conversation]
+    evaluations: list[EvaluationRecord]
+
+
+class Health(Contract):
+    status: Literal["ok"] = "ok"
+    database: Literal["sqlite"] = "sqlite"
+    ai_configured: bool

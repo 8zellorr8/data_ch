@@ -4,19 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "data-ch-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "CQA hackathon backend: versioned rubrics, evidence and appeals"
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1", "pydantic>=2.9,<3", "python-dotenv>=1,<2"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "ruff>=0.17,<1", "mypy>=2.4,<3"]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
 
 [tool.setuptools.package-data]
-backend = ["default_checklist.json"]
+backend = ["default_checklist.json", "schema.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["backend"]
