@@ -29,12 +29,23 @@ const messages = {
   DATASET_TOO_LARGE: 'Набор слишком большой: максимум 1000 диалогов и 8 МБ.',
   NOT_FOUND: 'Запись не найдена. Возможно, выбран другой сервер или база.',
   AI_BUSY: 'Все слоты модели заняты. Повторите этот запрос позже.',
-  BATCH_QUEUE_FULL: 'Очередь сервера заполнена. Повторите создание пакета позже.',
+  BATCH_QUEUE_FULL: 'Очередь сервера заполнена. Попробуйте позже.',
   IDEMPOTENCY_CONFLICT: 'Этот ключ уже относится к другому запросу. Восстановите исходную операцию.',
   EVALUATION_IN_PROGRESS: 'Запрос ещё выполняется на сервере. Повторите получение результата позже.',
   EVALUATION_FAILED: 'Предыдущий запуск завершился ошибкой. Проверьте историю и расход перед новой оценкой.',
   EVALUATION_INTERRUPTED: 'Запуск был прерван на сервере. Проверьте историю и расход перед новой оценкой.',
 };
+// Store an absolute deadline so a reload or an idempotent replay cannot restart
+// the wait. This is UI feedback only; the backend remains the rate-limit owner.
+export function retryAfterDeadline(value, now = Date.now()) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const raw = value.trim();
+  let deadline;
+  if (/^\d+$/.test(raw)) deadline = now + Number(raw) * 1000;
+  else if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(raw)) deadline = Date.parse(raw);
+  else return null;
+  return Number.isFinite(deadline) && deadline >= 0 && deadline <= 8.64e15 ? deadline : null;
+}
 export async function api(path, options = {}) {
   const {body, base = getApiBase(), timeoutMs = 30000, ...rest} = options;
   const controller = new AbortController();
@@ -67,6 +78,8 @@ export async function api(path, options = {}) {
     const error = new Error(messages[detail.code] || detail.message || `Ошибка сервера (${response.status})`);
     error.code = detail.code || 'HTTP_ERROR'; error.status = response.status; error.details = detail.details;
     error.requestId = response.headers.get('X-Request-ID'); error.executionId = response.headers.get('X-Execution-ID');
+    error.retryUntil = retryAfterDeadline(response.headers.get('Retry-After'));
+    if (error.retryUntil !== null && error.code === 'AI_UNAVAILABLE') error.message = 'Сервис модели запросил паузу. Повторное обращение возможно не раньше указанного времени.';
     throw error;
   }
   return data;
