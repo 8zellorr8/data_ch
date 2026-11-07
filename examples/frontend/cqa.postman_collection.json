@@ -1,0 +1,494 @@
+{
+  "info": {
+    "name": "CQA frontend handoff (manual synthetic demo)",
+    "description": "Run in order against a local demo backend. Every run creates a synthetic dataset, custom checklist and MANUAL evaluation. No model is called. Values demonstrate UI states, not Ground Truth. IDs/revisions are captured automatically. Requests are not retried. Start from step 01 on a new run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "01-health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['status']\", () => pm.expect(body[\"status\"]).to.deep.equal(\"ok\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02-import",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/datasets",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Искусственный пример для интерфейса\",\n  \"group_id\": \"EXAMPLE\",\n  \"records\": [\n    {\n      \"conversation_id\": \"synthetic-example-1\",\n      \"language\": \"RU\",\n      \"channel\": \"agent chat\",\n      \"transcript\": [\n        {\n          \"timestamp\": \"09:00:00\",\n          \"speaker\": \"client\",\n          \"text\": \"Здравствуйте! Где инструкция?\"\n        },\n        {\n          \"timestamp\": \"09:00:03\",\n          \"speaker\": \"operator\",\n          \"text\": \"Здравствуйте, я Анна. Инструкция в разделе Помощь. До свидания!\"\n        }\n      ],\n      \"audio_url\": null\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['count']\", () => pm.expect(body[\"count\"]).to.deep.equal(1));",
+              "  pm.collectionVariables.set(\"dataset_id\", body[\"id\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03-conversations",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/datasets/{{dataset_id}}/conversations?language=RU&limit=10&offset=0",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['total']\", () => pm.expect(body[\"total\"]).to.deep.equal(1));",
+              "  pm.collectionVariables.set(\"conversation_id\", body[\"items\"][0][\"id\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04-conversation",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/conversations/{{conversation_id}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['transcript', 1, 'id']\", () => pm.expect(body[\"transcript\"][1][\"id\"]).to.deep.equal(\"m2\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05-empty-history",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/conversations/{{conversation_id}}/evaluations",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['items']\", () => pm.expect(body[\"items\"]).to.deep.equal([]));",
+              "  pm.test(\"Response ['total']\", () => pm.expect(body[\"total\"]).to.deep.equal(0));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06-default-checklist",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/checklists/freedom-broker/versions/1",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07-custom-checklist",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/checklists",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"UI DEMO — ручные примеры, не эталон\",\n  \"global_rules\": \"Искусственный чек-лист для проверки интерфейса.\",\n  \"criteria\": [\n    {\n      \"id\": \"contact\",\n      \"name\": \"Приветствие\",\n      \"section\": \"Общение\",\n      \"type\": \"binary\",\n      \"weight\": 40,\n      \"rule\": \"Есть приветствие оператора.\"\n    },\n    {\n      \"id\": \"clarity\",\n      \"name\": \"Понятность\",\n      \"section\": \"Общение\",\n      \"type\": \"scale\",\n      \"weight\": 40,\n      \"scale\": [\n        0,\n        5,\n        10\n      ],\n      \"rule\": \"0 — непонятно, 5 — частично, 10 — понятно.\"\n    },\n    {\n      \"id\": \"wait\",\n      \"name\": \"Предупреждение об ожидании\",\n      \"section\": \"Общение\",\n      \"type\": \"binary\",\n      \"weight\": 20,\n      \"rule\": \"Оператор предупредил об ожидании.\",\n      \"allow_na\": true,\n      \"na_rule\": \"Ожидание не требовалось.\"\n    },\n    {\n      \"id\": \"abuse\",\n      \"name\": \"Грубость\",\n      \"section\": \"Нарушения\",\n      \"type\": \"flag\",\n      \"weight\": 0,\n      \"rule\": \"yes — присутствуют оскорбления.\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.collectionVariables.set(\"checklist_id\", body[\"checklist_id\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08-manual-evaluation",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/evaluations/manual",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"checklist_id\": \"{{checklist_id}}\",\n  \"checklist_version\": 1,\n  \"author\": \"UI DEMO\",\n  \"result\": {\n    \"answers\": [\n      {\n        \"criterion_id\": \"contact\",\n        \"value\": \"yes\",\n        \"explanation\": \"Приветствие присутствует.\",\n        \"evidence_kind\": \"present\",\n        \"evidence\": [\n          {\n            \"message_id\": \"m2\",\n            \"quote\": \"Здравствуйте, я Анна.\"\n          }\n        ]\n      },\n      {\n        \"criterion_id\": \"clarity\",\n        \"value\": 5,\n        \"explanation\": \"Демонстрационная ручная оценка для последующей апелляции.\",\n        \"evidence_kind\": \"present\",\n        \"evidence\": [\n          {\n            \"message_id\": \"m2\",\n            \"quote\": \"Инструкция в разделе Помощь.\"\n          }\n        ],\n        \"needs_review\": true,\n        \"limitation\": \"UI DEMO: требуется пересмотр человеком.\"\n      },\n      {\n        \"criterion_id\": \"wait\",\n        \"value\": \"na\",\n        \"explanation\": \"Ответ дан сразу.\",\n        \"na_reason\": \"Ожидание не требовалось.\",\n        \"evidence_kind\": \"not_applicable\",\n        \"evidence\": [\n          {\n            \"message_id\": \"m2\",\n            \"quote\": \"Инструкция в разделе Помощь.\"\n          }\n        ]\n      },\n      {\n        \"criterion_id\": \"abuse\",\n        \"value\": \"no\",\n        \"explanation\": \"Оскорблений в ответе нет.\",\n        \"evidence_kind\": \"missing\",\n        \"evidence\": [\n          {\n            \"message_id\": \"m2\",\n            \"quote\": \"До свидания!\"\n          }\n        ]\n      }\n    ]\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['origin']\", () => pm.expect(body[\"origin\"]).to.deep.equal(\"manual\"));",
+              "  pm.test(\"Response ['score', 'total']\", () => pm.expect(body[\"score\"][\"total\"]).to.deep.equal(75));",
+              "  pm.test(\"Response ['score', 'applicable_weight']\", () => pm.expect(body[\"score\"][\"applicable_weight\"]).to.deep.equal(80));",
+              "  pm.collectionVariables.set(\"evaluation_id\", body[\"id\"]);",
+              "  pm.collectionVariables.set(\"revision\", body[\"revision\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09-evaluation",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/evaluations/{{evaluation_id}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['revision']\", () => pm.expect(body[\"revision\"]).to.deep.equal(1));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10-open-appeal",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/evaluations/{{evaluation_id}}/appeals",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"criterion_id\": \"clarity\",\n  \"comment\": \"UI DEMO: пересмотреть понятность ответа.\",\n  \"author\": \"UI DEMO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['status']\", () => pm.expect(body[\"status\"]).to.deep.equal(\"open\"));",
+              "  pm.collectionVariables.set(\"appeal_id\", body[\"id\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11-duplicate-appeal-conflict",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/evaluations/{{evaluation_id}}/appeals",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"criterion_id\": \"clarity\",\n  \"comment\": \"UI DEMO: повторная апелляция.\",\n  \"author\": \"UI DEMO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "if (pm.response.code === 409) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['error', 'code']\", () => pm.expect(body[\"error\"][\"code\"]).to.deep.equal(\"APPEAL_EXISTS\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12-resolve-appeal",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/appeals/{{appeal_id}}/decision",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expected_revision\": {{revision}},\n  \"value\": 10,\n  \"reason\": \"UI DEMO: ручной пересмотр завершён.\",\n  \"reviewer\": \"UI DEMO reviewer\",\n  \"evidence_kind\": \"present\",\n  \"evidence\": [\n    {\n      \"message_id\": \"m2\",\n      \"quote\": \"Инструкция в разделе Помощь.\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['revision']\", () => pm.expect(body[\"revision\"]).to.deep.equal(2));",
+              "  pm.test(\"Response ['score', 'total']\", () => pm.expect(body[\"score\"][\"total\"]).to.deep.equal(100));",
+              "  pm.test(\"Response ['original_score', 'total']\", () => pm.expect(body[\"original_score\"][\"total\"]).to.deep.equal(75));",
+              "  pm.test(\"Response ['appeals', 0, 'status']\", () => pm.expect(body[\"appeals\"][0][\"status\"]).to.deep.equal(\"resolved\"));",
+              "  pm.collectionVariables.set(\"revision\", body[\"revision\"]);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13-history",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/conversations/{{conversation_id}}/evaluations",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['total']\", () => pm.expect(body[\"total\"]).to.deep.equal(1));",
+              "  pm.test(\"Response ['items', 0, 'score']\", () => pm.expect(body[\"items\"][0][\"score\"]).to.deep.equal(100));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14-export",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/datasets/{{dataset_id}}/export",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['schema_version']\", () => pm.expect(body[\"schema_version\"]).to.deep.equal(1));",
+              "  pm.test(\"Response ['evaluations', 0, 'revision']\", () => pm.expect(body[\"evaluations\"][0][\"revision\"]).to.deep.equal(2));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15-validation-error",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/api/v1/datasets",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"   \",\n  \"records\": []\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 422\", () => pm.response.to.have.status(422));",
+              "if (pm.response.code === 422) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['error', 'code']\", () => pm.expect(body[\"error\"][\"code\"]).to.deep.equal(\"VALIDATION_ERROR\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16-not-found",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/conversations/frontend-demo-missing",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "if (pm.response.code === 404) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Response ['error', 'code']\", () => pm.expect(body[\"error\"][\"code\"]).to.deep.equal(\"NOT_FOUND\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

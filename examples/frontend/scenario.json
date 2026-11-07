@@ -1,0 +1,109 @@
+{
+  "description": "Run in order against a local demo backend. Every run creates a synthetic dataset, custom checklist and MANUAL evaluation. No model is called. Values demonstrate UI states, not Ground Truth. IDs/revisions are captured automatically. Requests are not retried. Start from step 01 on a new run.",
+  "numeric_variables": ["revision"],
+  "steps": [
+    {
+      "name": "01-health", "method": "GET", "path": "/health", "status": 200,
+      "checks": [{"path": ["status"], "equals": "ok"}]
+    },
+    {
+      "name": "02-import", "method": "POST", "path": "/api/v1/datasets", "status": 201,
+      "body_file": "../synthetic-dataset.json",
+      "capture": {"dataset_id": ["id"]},
+      "checks": [{"path": ["count"], "equals": 1}]
+    },
+    {
+      "name": "03-conversations", "method": "GET",
+      "path": "/api/v1/datasets/{{dataset_id}}/conversations?language=RU&limit=10&offset=0",
+      "status": 200,
+      "capture": {"conversation_id": ["items", 0, "id"]},
+      "checks": [{"path": ["total"], "equals": 1}]
+    },
+    {
+      "name": "04-conversation", "method": "GET",
+      "path": "/api/v1/conversations/{{conversation_id}}", "status": 200,
+      "checks": [{"path": ["transcript", 1, "id"], "equals": "m2"}]
+    },
+    {
+      "name": "05-empty-history", "method": "GET",
+      "path": "/api/v1/conversations/{{conversation_id}}/evaluations", "status": 200,
+      "checks": [{"path": ["items"], "equals": []}, {"path": ["total"], "equals": 0}]
+    },
+    {
+      "name": "06-default-checklist", "method": "GET",
+      "path": "/api/v1/checklists/freedom-broker/versions/1", "status": 200
+    },
+    {
+      "name": "07-custom-checklist", "method": "POST", "path": "/api/v1/checklists",
+      "status": 201, "capture": {"checklist_id": ["checklist_id"]},
+      "body": {
+        "name": "UI DEMO — ручные примеры, не эталон",
+        "global_rules": "Искусственный чек-лист для проверки интерфейса.",
+        "criteria": [
+          {"id": "contact", "name": "Приветствие", "section": "Общение", "type": "binary", "weight": 40, "rule": "Есть приветствие оператора."},
+          {"id": "clarity", "name": "Понятность", "section": "Общение", "type": "scale", "weight": 40, "scale": [0, 5, 10], "rule": "0 — непонятно, 5 — частично, 10 — понятно."},
+          {"id": "wait", "name": "Предупреждение об ожидании", "section": "Общение", "type": "binary", "weight": 20, "rule": "Оператор предупредил об ожидании.", "allow_na": true, "na_rule": "Ожидание не требовалось."},
+          {"id": "abuse", "name": "Грубость", "section": "Нарушения", "type": "flag", "weight": 0, "rule": "yes — присутствуют оскорбления."}
+        ]
+      }
+    },
+    {
+      "name": "08-manual-evaluation", "method": "POST", "path": "/api/v1/evaluations/manual",
+      "status": 201, "capture": {"evaluation_id": ["id"], "revision": ["revision"]},
+      "checks": [{"path": ["origin"], "equals": "manual"}, {"path": ["score", "total"], "equals": 75}, {"path": ["score", "applicable_weight"], "equals": 80}],
+      "body": {
+        "conversation_id": "{{conversation_id}}", "checklist_id": "{{checklist_id}}",
+        "checklist_version": 1, "author": "UI DEMO",
+        "result": {"answers": [
+          {"criterion_id": "contact", "value": "yes", "explanation": "Приветствие присутствует.", "evidence_kind": "present", "evidence": [{"message_id": "m2", "quote": "Здравствуйте, я Анна."}]},
+          {"criterion_id": "clarity", "value": 5, "explanation": "Демонстрационная ручная оценка для последующей апелляции.", "evidence_kind": "present", "evidence": [{"message_id": "m2", "quote": "Инструкция в разделе Помощь."}], "needs_review": true, "limitation": "UI DEMO: требуется пересмотр человеком."},
+          {"criterion_id": "wait", "value": "na", "explanation": "Ответ дан сразу.", "na_reason": "Ожидание не требовалось.", "evidence_kind": "not_applicable", "evidence": [{"message_id": "m2", "quote": "Инструкция в разделе Помощь."}]},
+          {"criterion_id": "abuse", "value": "no", "explanation": "Оскорблений в ответе нет.", "evidence_kind": "missing", "evidence": [{"message_id": "m2", "quote": "До свидания!"}]}
+        ]}
+      }
+    },
+    {
+      "name": "09-evaluation", "method": "GET", "path": "/api/v1/evaluations/{{evaluation_id}}",
+      "status": 200, "checks": [{"path": ["revision"], "equals": 1}]
+    },
+    {
+      "name": "10-open-appeal", "method": "POST", "path": "/api/v1/evaluations/{{evaluation_id}}/appeals",
+      "status": 201, "capture": {"appeal_id": ["id"]},
+      "body": {"criterion_id": "clarity", "comment": "UI DEMO: пересмотреть понятность ответа.", "author": "UI DEMO"},
+      "checks": [{"path": ["status"], "equals": "open"}]
+    },
+    {
+      "name": "11-duplicate-appeal-conflict", "method": "POST", "path": "/api/v1/evaluations/{{evaluation_id}}/appeals",
+      "status": 409,
+      "body": {"criterion_id": "clarity", "comment": "UI DEMO: повторная апелляция.", "author": "UI DEMO"},
+      "checks": [{"path": ["error", "code"], "equals": "APPEAL_EXISTS"}]
+    },
+    {
+      "name": "12-resolve-appeal", "method": "POST", "path": "/api/v1/appeals/{{appeal_id}}/decision",
+      "status": 200, "capture": {"revision": ["revision"]},
+      "body": {
+        "expected_revision": "{{revision}}", "value": 10, "reason": "UI DEMO: ручной пересмотр завершён.",
+        "reviewer": "UI DEMO reviewer", "evidence_kind": "present",
+        "evidence": [{"message_id": "m2", "quote": "Инструкция в разделе Помощь."}]
+      },
+      "checks": [{"path": ["revision"], "equals": 2}, {"path": ["score", "total"], "equals": 100}, {"path": ["original_score", "total"], "equals": 75}, {"path": ["appeals", 0, "status"], "equals": "resolved"}]
+    },
+    {
+      "name": "13-history", "method": "GET", "path": "/api/v1/conversations/{{conversation_id}}/evaluations",
+      "status": 200, "checks": [{"path": ["total"], "equals": 1}, {"path": ["items", 0, "score"], "equals": 100}]
+    },
+    {
+      "name": "14-export", "method": "GET", "path": "/api/v1/datasets/{{dataset_id}}/export",
+      "status": 200, "checks": [{"path": ["schema_version"], "equals": 1}, {"path": ["evaluations", 0, "revision"], "equals": 2}]
+    },
+    {
+      "name": "15-validation-error", "method": "POST", "path": "/api/v1/datasets", "status": 422,
+      "body": {"name": "   ", "records": []},
+      "checks": [{"path": ["error", "code"], "equals": "VALIDATION_ERROR"}]
+    },
+    {
+      "name": "16-not-found", "method": "GET", "path": "/api/v1/conversations/frontend-demo-missing", "status": 404,
+      "checks": [{"path": ["error", "code"], "equals": "NOT_FOUND"}]
+    }
+  ]
+}
