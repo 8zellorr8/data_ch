@@ -38,6 +38,26 @@ test('failed call keeps execution ID for usage reporting', async () => {
   const s=createOperationStore({storage:memory(),getBase:()=> 'base',uuid:()=> 'k',request:async()=>{throw Object.assign(Error('failed'),{code:'AI_TIMEOUT',executionId:'execution-1'});}});
   const op=s.prepareOperation('s','/p',{a:1});await assert.rejects(s.sendOperation(op));assert.equal(s.findOperation('s').error.executionId,'execution-1');
 });
+
+test('cooldown deadline survives reload and a terminal same-key replay without new attempts', async () => {
+  const saved=memory(), calls=[], retryUntil=Date.now()+60000;
+  const config={storage:saved,getBase:()=> 'https://api.example',uuid:()=> 'same-key',request:async(path,options)=>{
+    calls.push(options);
+    if (calls.length === 1) throw Object.assign(Error('cooldown'),{code:'AI_UNAVAILABLE',status:502,retryUntil,executionId:'execution-wait'});
+    throw Object.assign(Error('terminal failure'),{code:'EVALUATION_FAILED',status:409,retryUntil:null});
+  }};
+  const first=createOperationStore(config), op=first.prepareOperation('evaluation:c:ai','/api/v1/evaluations',{conversation_id:'c',checklist_id:'r',checklist_version:1});
+  await assert.rejects(first.sendOperation(op));
+  const restored=createOperationStore(config), recovered=restored.findOperation(op.scope);
+  assert.equal(recovered.error.retryUntil,retryUntil);
+  await assert.rejects(restored.sendOperation(recovered),error=>error.code==='EVALUATION_FAILED' && error.retryUntil===retryUntil);
+  const terminal=restored.findOperation(op.scope);
+  assert.equal(terminal.error.retryUntil,retryUntil);
+  assert.equal(terminal.error.executionId,'execution-wait');
+  assert.equal(calls.length,2);
+  assert.equal(calls[0].headers['Idempotency-Key'],calls[1].headers['Idempotency-Key']);
+  assert.deepEqual(calls[0].body,calls[1].body);
+});
 test('hosted and local proxy pages use their own origin', () => {
   assert.equal(defaultApiBase({protocol:'https:',hostname:'demo.example',origin:'https://demo.example'}),'https://demo.example');
   assert.equal(defaultApiBase({protocol:'http:',hostname:'127.0.0.1',origin:'http://127.0.0.1:5173'}),'http://127.0.0.1:5173');

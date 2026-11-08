@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBatchController, batchCounts, batchItemLabel, getLegacyBatchTasks} from '../batch.js';
+import {createBatchController, batchCounts, batchItemLabel, batchRetrySummary, canResumeBatchItem, getLegacyBatchTasks} from '../batch.js';
 import {createOperationStore} from '../operations.js';
 
 const base = 'https://example.invalid';
@@ -185,4 +185,121 @@ test('old browser journal keeps running and uncertain tasks visible until explic
     store.setItem(key,'{}');
     assert.throws(() => getLegacyBatchTasks(),/Не удалось прочитать журнал/);
   } finally { globalThis.sessionStorage = originalSession; globalThis.localStorage = originalLocal; }
+});
+
+function limitedRecord(status = 'failed') {
+  const value = record(['succeeded', status, 'interrupted']);
+  Object.assign(value.items[1], {error_code:'AI_QUOTA_EXHAUSTED', retry_at:2000000000, rate_limit_retries:3});
+  value.items[2].error_code = 'BATCH_CANCELLED_BEFORE_START';
+  return value;
+}
+
+test('limit waits, quota exhaustion and cancellation have distinct states', () => {
+  assert.equal(batchItemLabel({status:'pending',error_code:'AI_RATE_LIMITED'}),'Ожидание лимита');
+  assert.equal(batchItemLabel({status:'pending',error_code:'AI_QUOTA_EXHAUSTED'}),'Ожидание квоты');
+  assert.equal(batchItemLabel({status:'failed',error_code:'AI_QUOTA_EXHAUSTED',evaluation_id:null}),'Квота исчерпана');
+  assert.equal(batchItemLabel({status:'interrupted',error_code:'RESTORE_REQUIRES_REVIEW'}),'Требует проверки');
+  assert.equal(batchItemLabel({status:'failed',error_code:'AI_INVALID_RESULT'}),'Ошибка');
+  assert.deepEqual(batchRetrySummary(limitedRecord()),{waiting:0,resumable:1});
+  assert.deepEqual(batchRetrySummary(limitedRecord('pending')),{waiting:1,resumable:0});
+});
+
+test('resume eligibility never includes existing evaluations, ordinary errors, interrupted or pending work', () => {
+  for (const status of ['pending','running','succeeded','interrupted']) assert.equal(canResumeBatchItem({status,error_code:'AI_RATE_LIMITED'}),false);
+  for (const error_code of ['AI_UNAVAILABLE','AI_INVALID_RESULT','AI_TIMEOUT','BATCH_CANCELLED_BEFORE_START']) assert.equal(canResumeBatchItem({status:'failed',error_code}),false);
+  assert.equal(canResumeBatchItem({status:'failed',error_code:'AI_RATE_LIMITED',evaluation_id:'existing'}),false);
+  assert.equal(canResumeBatchItem({status:'failed',error_code:'AI_RATE_LIMITED',evaluation_id:null}),true);
+  assert.equal(canResumeBatchItem({status:'failed',error_code:'AI_QUOTA_EXHAUSTED'}),true);
+});
+
+test('manual continuation uses the existing batch and preserves successes, cancellation and cooldown', async () => {
+  const calls = [];
+  const {controller,schedule} = setup(async (path,options = {}) => {
+    calls.push({path,options});
+    return options.method === 'POST' ? limitedRecord('pending') : limitedRecord();
+  });
+  await controller.refresh('batch-1'); controller.pause();
+  const state = await controller.resumeBatch();
+  assert.deepEqual(calls.map(call => [call.path,call.options.method || 'GET']),[[endpoint+'/batch-1','GET'],[endpoint+'/batch-1/resume','POST']]);
+  assert.equal(calls[1].options.body,undefined);
+  assert.equal(state.record.items[0].evaluation_id,'evaluation-0');
+  assert.equal(state.record.items[2].status,'interrupted');
+  assert.equal(state.record.items[1].retry_at,2000000000);
+  assert.equal(state.paused,false); assert.equal(schedule.size(),1);
+  controller.dispose();
+});
+
+test('continuation is available while other batch items are running', async () => {
+  const value = limitedRecord(); value.items[2].status = 'running'; value.completed = false;
+  let posts = 0;
+  const {controller} = setup(async (path,options = {}) => {if(options.method === 'POST') posts++; return value;});
+  await controller.refresh('batch-1'); await controller.resumeBatch();
+  assert.equal(posts,1); controller.dispose();
+});
+
+test('pending quota waits and unrelated failures never trigger resume POST', async () => {
+  let posts = 0, current = limitedRecord('pending');
+  const {controller} = setup(async (path,options = {}) => {if(options.method === 'POST') posts++;return current;});
+  await controller.refresh('batch-1'); await controller.resumeBatch();
+  current = record(['failed','interrupted','succeeded']);
+  await controller.refresh(); await controller.resumeBatch();
+  assert.equal(posts,0); controller.dispose();
+});
+
+test('double click and conflicting cancel cannot issue extra writes while resuming', async () => {
+  const pending = deferred(); let posts = 0;
+  const {controller} = setup(async (path,options = {}) => {
+    if (options.method === 'POST') {posts++;return pending.promise;}
+    return limitedRecord();
+  });
+  await controller.refresh('batch-1');
+  const resuming = controller.resumeBatch();
+  assert.equal(controller.getState().resuming,true);
+  await controller.resumeBatch(); await controller.cancel(); await controller.refresh();
+  assert.equal(posts,1);
+  pending.resolve(limitedRecord('pending')); await resuming;
+  assert.equal(controller.getState().resuming,false); controller.dispose();
+});
+
+test('slow poll cannot overwrite a newer resume response', async () => {
+  const stale = deferred(); let reads = 0;
+  const {controller} = setup(async (path,options = {}) => {
+    if (options.method === 'POST') return limitedRecord('pending');
+    return ++reads === 1 ? limitedRecord() : stale.promise;
+  });
+  await controller.refresh('batch-1');
+  const reading = controller.refresh(); await controller.resumeBatch();
+  stale.resolve(limitedRecord()); await reading;
+  assert.equal(controller.getState().record.items[1].status,'pending'); controller.dispose();
+});
+
+test('lost resume response reconciles with GET and never automatically grants a second retry budget', async () => {
+  const calls = []; let reads = 0;
+  const {controller,schedule} = setup(async (path,options = {}) => {
+    calls.push({path,method:options.method || 'GET'});
+    if (options.method === 'POST') throw Object.assign(Error('connection lost'),{code:'NETWORK_ERROR'});
+    return ++reads === 1 ? limitedRecord() : limitedRecord('pending');
+  });
+  await controller.refresh('batch-1');
+  await assert.rejects(controller.resumeBatch(),/connection lost/);
+  assert.equal(controller.getState().record.items[1].status,'pending');
+  assert.equal(controller.getState().resumeNeedsRefresh,false);
+  await schedule.tick();
+  assert.equal(calls.filter(call => call.method === 'POST').length,1);
+  assert.equal(calls[2].method,'GET'); controller.dispose();
+});
+
+test('unresolved resume outcome blocks more writes until a successful state read', async () => {
+  let reads = 0, posts = 0, offline = true;
+  const {controller} = setup(async (path,options = {}) => {
+    if (options.method === 'POST') {posts++;throw Error('lost');}
+    if (++reads > 1 && offline) throw Error('offline');
+    return limitedRecord();
+  });
+  await controller.refresh('batch-1'); await assert.rejects(controller.resumeBatch());
+  assert.equal(controller.getState().resumeNeedsRefresh,true);
+  await controller.resumeBatch(); assert.equal(posts,1);
+  offline = false; await controller.refresh();
+  assert.equal(controller.getState().resumeNeedsRefresh,false);
+  assert.equal(controller.getState().warning,''); controller.dispose();
 });

@@ -6,6 +6,7 @@ const endpoint = '/api/v1/evaluation-batches';
 const scope = 'batch:create';
 const encode = encodeURIComponent;
 const terminal = new Set(['succeeded', 'failed', 'interrupted']);
+const limited = new Set(['AI_RATE_LIMITED', 'AI_QUOTA_EXHAUSTED']);
 const labels = { pending: 'В очереди', running: 'Оценивается', succeeded: 'Готово', failed: 'Ошибка', interrupted: 'Прервано' };
 const reasons = {
   BATCH_CANCELLED_BEFORE_START: 'Отменено до запуска',
@@ -13,6 +14,7 @@ const reasons = {
   AI_TIMEOUT: 'Истекло время ожидания модели', AI_UNAVAILABLE: 'Модель недоступна',
   AI_RATE_LIMITED: 'Лимит частоты запросов модели',
   AI_QUOTA_EXHAUSTED: 'Квота модели исчерпана',
+  RESTORE_REQUIRES_REVIEW: 'Требует проверки после восстановления',
   EVALUATION_INTERRUPTED: 'Обработка прервана на сервере', WORKER_INTERRUPTED: 'Обработчик остановлен',
 };
 
@@ -23,7 +25,28 @@ export function batchCounts(batch) {
     failed: count('failed'), interrupted: count('interrupted'), finished: items.filter(item => terminal.has(item.status)).length };
 }
 export function batchItemLabel(item) {
-  return item.status === 'interrupted' && item.error_code === 'BATCH_CANCELLED_BEFORE_START' ? 'Отменено до запуска' : labels[item.status] || item.status;
+  if (item.status === 'interrupted' && item.error_code === 'BATCH_CANCELLED_BEFORE_START') return 'Отменено до запуска';
+  if (item.status === 'interrupted' && item.error_code === 'RESTORE_REQUIRES_REVIEW') return 'Требует проверки';
+  if (item.status === 'pending' && limited.has(item.error_code)) return item.error_code === 'AI_QUOTA_EXHAUSTED' ? 'Ожидание квоты' : 'Ожидание лимита';
+  if (canResumeBatchItem(item)) return item.error_code === 'AI_QUOTA_EXHAUSTED' ? 'Квота исчерпана' : 'Повторы исчерпаны';
+  return labels[item.status] || item.status;
+}
+export function canResumeBatchItem(item) {
+  return item.status === 'failed' && item.evaluation_id == null && limited.has(item.error_code);
+}
+export function batchRetrySummary(batch) {
+  const items = batch?.items || [];
+  return {
+    waiting: items.filter(item => item.status === 'pending' && limited.has(item.error_code)).length,
+    resumable: items.filter(canResumeBatchItem).length,
+  };
+}
+function retryDetails(item) {
+  if (!['pending', 'failed'].includes(item.status) || !limited.has(item.error_code)) return '';
+  const retryDate = typeof item.retry_at === 'number' && Number.isFinite(item.retry_at) ? new Date(item.retry_at * 1000) : null;
+  const time = retryDate && Number.isFinite(retryDate.getTime()) ? `<small>Следующая попытка не раньше <time datetime="${retryDate.toISOString()}">${esc(retryDate.toLocaleString('ru-RU', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}))}</time> · время вашего устройства</small>` : '';
+  const attempts = Number.isInteger(item.rate_limit_retries) && item.rate_limit_retries > 0 ? `<small>Повторов по лимиту: ${item.rate_limit_retries}</small>` : '';
+  return `${item.status === 'pending' ? '<small>Повтор запланирован на сервере автоматически.</small>' : canResumeBatchItem(item) ? '<small>Автоматические повторы исчерпаны. Доступно ручное продолжение.</small>' : ''}${time}${attempts}`;
 }
 
 // Keep old, unkeyed browser requests visible during migration. They cannot be
@@ -43,7 +66,7 @@ export function createBatchController({ request = api, getBase = getApiBase, ope
   onChange = () => {}, pollMs = 2500, schedule = setTimeout, unschedule = clearTimeout } = {}) {
   const base = getBase();
   let disposed = false, generation = 0, timer = null;
-  let state = { record: null, busy: false, creating: false, cancelling: false, paused: false, error: '', warning: '' };
+  let state = { record: null, busy: false, creating: false, cancelling: false, resuming: false, resumeNeedsRefresh: false, paused: false, error: '', warning: '' };
   const getState = () => structuredClone({ ...state, counts: batchCounts(state.record) });
   const notify = () => { if (!disposed) { try { onChange(getState()); } catch { /* Presentation does not change server outcome. */ } } };
   const ensureServer = () => { if (getBase() !== base) throw new Error('Адрес сервера изменился. Вернитесь к исходному серверу, чтобы открыть пакет.'); };
@@ -53,7 +76,7 @@ export function createBatchController({ request = api, getBase = getApiBase, ope
     if (!disposed && !state.paused && state.record && !state.record.completed && getBase() === base) timer = schedule(() => { timer = null; refresh().catch(() => {}); }, pollMs);
   }
   async function refresh(id = state.record?.id) {
-    if (!id || disposed || state.creating || state.cancelling) return getState();
+    if (!id || disposed || state.creating || state.cancelling || state.resuming) return getState();
     ensureServer(); clearTimer();
     const current = ++generation;
     state.busy = true; state.error = ''; notify();
@@ -62,6 +85,8 @@ export function createBatchController({ request = api, getBase = getApiBase, ope
       if (disposed || current !== generation || getBase() !== base) return getState();
       if (record?.id !== id || !Array.isArray(record.items)) throw new Error('Сервер вернул неожиданный пакет. Обновите страницу.');
       state.record = record;
+      if (state.resumeNeedsRefresh) state.warning = '';
+      state.resumeNeedsRefresh = false;
     } catch (error) {
       if (!disposed && current === generation) state.error = error.message;
       throw error;
@@ -105,7 +130,7 @@ export function createBatchController({ request = api, getBase = getApiBase, ope
   }
   async function cancel() {
     ensureServer();
-    if (!state.record || state.record.completed || state.cancelling || disposed) return getState();
+    if (!state.record || state.record.completed || state.cancelling || state.resuming || disposed) return getState();
     clearTimer(); const current = ++generation;
     state.cancelling = true; state.busy = false; state.error = ''; notify();
     try {
@@ -117,10 +142,46 @@ export function createBatchController({ request = api, getBase = getApiBase, ope
     finally { if (!disposed && current === generation) { state.cancelling = false; notify(); nextPoll(); } }
     return getState();
   }
+  async function resumeBatch() {
+    ensureServer();
+    if (disposed || state.resuming || state.cancelling || state.resumeNeedsRefresh || !batchRetrySummary(state.record).resumable) return getState();
+    clearTimer(); const current = ++generation, id = state.record.id;
+    state.resuming = true; state.busy = false; state.error = ''; state.warning = ''; notify();
+    let failure;
+    try {
+      const record = await request(endpoint + '/' + encode(id) + '/resume', {method: 'POST', base});
+      if (disposed || current !== generation || getBase() !== base) return getState();
+      if (record?.id !== id || !Array.isArray(record.items)) throw new Error('Сервер вернул неожиданный ответ на продолжение пакета.');
+      state.record = record;
+      state.paused = false;
+    } catch (error) {
+      failure = error;
+      if (!disposed && current === generation && getBase() === base) {
+        state.error = error.message;
+        state.resumeNeedsRefresh = true;
+        state.warning = 'Продолжение не подтверждено. Перечитываем состояние пакета; повторный запуск автоматически не отправляется.';
+      }
+    } finally {
+      if (!disposed && current === generation) { state.resuming = false; notify(); nextPoll(); }
+    }
+    // Resume grants a new retry budget. A lost reply must only trigger a GET,
+    // never an automatic second POST that could grant another budget.
+    if (failure) {
+      if (!disposed && getBase() === base) {
+        await refresh(id).catch(() => {});
+        state.warning = state.resumeNeedsRefresh
+          ? 'Не удалось узнать результат продолжения. Нажмите «Обновить» перед следующей попыткой.'
+          : `Состояние пакета перечитано. Ответ на продолжение: ${failure.message} Проверьте состояние перед следующим действием.`;
+        notify();
+      }
+      throw failure;
+    }
+    return getState();
+  }
   function dispose() { disposed = true; generation++; clearTimer(); }
   function pause() { state.paused = true; clearTimer(); notify(); }
   async function resume() { state.paused = false; return refresh(); }
-  return {start, retryCreation, refresh, cancel, pause, resume, dispose, getState};
+  return {start, retryCreation, refresh, cancel, resumeBatch, pause, resume, dispose, getState};
 }
 
 export function openBatchDialog({items = [], aiConfigured = false, onClosed = () => {}} = {}) {
@@ -178,10 +239,17 @@ export function openBatchDialog({items = [], aiConfigured = false, onClosed = ()
 }
 
 function badge(item) {
-  return `<span class="badge ${item.status === 'succeeded' ? 'green' : item.status === 'failed' ? 'red' : item.status === 'interrupted' ? 'amber' : ''}">${esc(batchItemLabel(item))}</span>`;
+  return `<span class="badge ${item.status === 'succeeded' ? 'green' : canResumeBatchItem(item) || (item.status === 'pending' && limited.has(item.error_code)) || item.status === 'interrupted' ? 'amber' : item.status === 'failed' ? 'red' : ''}">${esc(batchItemLabel(item))}</span>`;
 }
 function countsHTML(counts) {
   return `<div class="batch-counts" role="status"><span>Завершено<strong>${counts.finished} / ${counts.total}</strong></span><span>Готово<strong>${counts.succeeded}</strong></span><span>Ошибка<strong>${counts.failed}</strong></span><span>Прервано / отменено<strong>${counts.interrupted}</strong></span><span>В очереди<strong>${counts.pending}</strong></span><span>В работе<strong>${counts.running}</strong></span></div>`;
+}
+function retryPanelHTML(state, retry) {
+  if (!retry.waiting && !retry.resumable) return '';
+  return `<section class="batch-retry-panel notice amber" aria-labelledby="batch-retry-heading"><div><h3 id="batch-retry-heading">${retry.resumable ? 'Автоматические повторы исчерпаны' : 'Ожидание доступа к модели'}</h3>
+    ${retry.waiting ? `<p>Ожидают лимит или квоту: ${retry.waiting}. Сервер продолжит эти диалоги автоматически после установленной паузы.</p>` : ''}
+    ${retry.resumable ? `<p>Можно продолжить диалогов: ${retry.resumable}. Готовые оценки сохранятся; отменённые, прерванные и остальные ошибки не будут запущены снова.</p><p id="batch-resume-hint">Продолжение даёт новые попытки и может расходовать квоту. Установленная сервером пауза сохраняется. При исчерпанной квоте сначала проверьте её доступность у провайдера.</p>` : ''}</div>
+    ${retry.resumable ? `<button type="button" class="button primary" data-batch-view="resume-batch" aria-describedby="batch-resume-hint" ${state.resuming || state.cancelling || state.resumeNeedsRefresh ? 'disabled' : ''}>${state.resuming ? 'Продолжаем пакет…' : 'Продолжить пакет'}</button>` : ''}</section>`;
 }
 
 export async function mountBatches(host, {batchId} = {}) {
@@ -265,16 +333,18 @@ export async function mountBatches(host, {batchId} = {}) {
   }
   function renderDetail(state) {
     if (!active()) return;
-    const currentView=JSON.stringify([state.record,state.error,state.warning,state.cancelling,state.paused]);
-    if(currentView===lastDetailView) { const button=host.querySelector('[data-batch-view="refresh"]');if(button)button.disabled=state.busy||state.cancelling; return; }
+    const currentView=JSON.stringify([state.record,state.error,state.warning,state.cancelling,state.resuming,state.resumeNeedsRefresh,state.paused]);
+    if(currentView===lastDetailView) { const button=host.querySelector('[data-batch-view="refresh"]');if(button)button.disabled=state.busy||state.cancelling||state.resuming; return; }
     lastDetailView=currentView;
     const focused = document.activeElement?.dataset.batchView;
     const focusedLink = host.contains(document.activeElement) ? document.activeElement?.getAttribute('href') : null;
     const record = state.record, counts = state.counts;
-    host.innerHTML = `<div class="page-heading"><div><a href="#batches" class="back-link">← Все пакеты</a><h1>Проверка диалогов</h1><p>${record ? `${esc(record.checklist_id)} · версия ${record.checklist_version} · ${esc(dateText(record.created_at))}` : 'Загружаем пакет'}</p></div><div class="heading-actions"><button class="button secondary" data-batch-view="refresh" ${state.busy || state.cancelling ? 'disabled' : ''}>${icon('refresh')}Обновить</button>${record && !record.completed ? `<button class="button secondary" data-batch-view="cancel" ${!counts.pending || state.cancelling ? 'disabled' : ''}>${state.cancelling ? 'Отменяем ожидающие…' : 'Отменить ожидающие'}</button>` : ''}</div></div>
+    const retry = batchRetrySummary(record), mutating = state.cancelling || state.resuming;
+    const title = record?.completed ? (retry.resumable ? 'Пакет ожидает продолжения' : 'Пакет завершён') : retry.waiting && !counts.running ? 'Пакет ожидает доступ к модели' : 'Проверка выполняется на сервере';
+    host.innerHTML = `<div class="page-heading"><div><a href="#batches" class="back-link">← Все пакеты</a><h1>Проверка диалогов</h1><p>${record ? `${esc(record.checklist_id)} · версия ${record.checklist_version} · ${esc(dateText(record.created_at))}` : 'Загружаем пакет'}</p></div><div class="heading-actions"><button class="button secondary" data-batch-view="refresh" ${state.busy || mutating ? 'disabled' : ''}>${icon('refresh')}Обновить</button>${record && !record.completed ? `<button class="button secondary" data-batch-view="cancel" ${!counts.pending || mutating ? 'disabled' : ''}>${state.cancelling ? 'Отменяем ожидающие…' : 'Отменить ожидающие'}</button>` : ''}</div></div>
       ${state.error ? `<div class="notice error" role="alert">${esc(state.error)}</div>` : ''}${state.warning ? `<div class="notice amber">${esc(state.warning)}</div>` : ''}
-      ${record ? `<section class="panel batch-detail"><div class="section-heading"><h2>${record.completed ? 'Пакет завершён' : 'Проверка выполняется на сервере'}</h2><span class="badge">${record.completed ? 'Все элементы обработаны' : state.paused ? 'Обновление приостановлено' : 'Обновление каждые 2,5 с'}</span></div><p class="muted">${record.completed ? 'Проверьте ошибки и прерванные элементы. Завершение пакета не означает, что все диалоги оценены.' : 'Страницу можно закрыть. Отмена действует только на ожидающие диалоги; текущий вызов модели продолжится.'}</p>${!record.completed ? `<div class="batch-update-controls"><button type="button" class="button secondary small" data-batch-view="pause">${state.paused ? 'Продолжить обновление' : 'Приостановить обновление'}</button>${state.paused ? '<span>Прогресс на экране приостановлен. Проверка на сервере продолжается.</span>' : ''}</div>` : ''}${countsHTML(counts)}<progress class="batch-progress" value="${counts.finished}" max="${counts.total || 1}" aria-label="Обработано ${counts.finished} из ${counts.total}"></progress>
-      <ol class="batch-task-list batch-results" aria-label="Результаты пакета">${record.items.map((item, i) => `<li><div class="batch-task-id"><a href="#review/${encode(item.conversation_id)}${item.evaluation_id ? '/' + encode(item.evaluation_id) : ''}">Диалог ${i + 1}</a><small>${esc(item.conversation_id)}</small>${item.error_code ? `<small>${esc(reasons[item.error_code] || 'Ошибка обработки')} · ${esc(item.error_code)}</small>` : ''}</div><div class="batch-task-status">${badge(item)}${item.evaluation_id ? `<a class="button secondary small" href="#review/${encode(item.conversation_id)}/${encode(item.evaluation_id)}">Открыть оценку</a>` : ''}</div></li>`).join('')}</ol><p class="batch-record-id">ID пакета: ${esc(record.id)}</p><div class="toolbar"><a class="button secondary" href="#reports?batch=${encode(record.id)}">Расход пакета</a>${record.completed ? `<a class="button secondary" href="#submission?batch=${encode(record.id)}">Подготовить сдачу</a>` : ''}</div></section>` : '<div class="panel" role="status">Нет данных пакета</div>'}`;
+      ${record ? `<section class="panel batch-detail" aria-labelledby="batch-status"><div class="section-heading"><h2 id="batch-status" tabindex="-1">${title}</h2><span class="badge">${record.completed ? (retry.resumable ? 'Нужно ваше действие' : 'Обработка завершена') : state.paused ? 'Обновление приостановлено' : 'Обновление каждые 2,5 с'}</span></div><p class="muted">${record.completed ? 'Проверьте ошибки и прерванные элементы. Завершение пакета не означает, что все диалоги оценены.' : 'Страницу можно закрыть. Отмена действует только на ожидающие диалоги; текущий вызов модели продолжится.'}</p>${retryPanelHTML(state, retry)}${!record.completed ? `<div class="batch-update-controls"><button type="button" class="button secondary small" data-batch-view="pause" ${mutating ? 'disabled' : ''}>${state.paused ? 'Продолжить обновление' : 'Приостановить обновление'}</button>${state.paused ? '<span>Прогресс на экране приостановлен. Проверка на сервере продолжается.</span>' : ''}</div>` : ''}${countsHTML(counts)}<progress class="batch-progress" value="${counts.finished}" max="${counts.total || 1}" aria-label="Обработано ${counts.finished} из ${counts.total}"></progress>
+      <ol class="batch-task-list batch-results" aria-label="Результаты пакета">${record.items.map((item, i) => `<li><div class="batch-task-id"><a href="#review/${encode(item.conversation_id)}${item.evaluation_id ? '/' + encode(item.evaluation_id) : ''}">Диалог ${i + 1}</a><small>${esc(item.conversation_id)}</small>${item.error_code ? `<small>${esc(reasons[item.error_code] || 'Ошибка обработки')} · ${esc(item.error_code)}</small>` : ''}${retryDetails(item)}</div><div class="batch-task-status">${badge(item)}${item.evaluation_id ? `<a class="button secondary small" href="#review/${encode(item.conversation_id)}/${encode(item.evaluation_id)}">Открыть оценку</a>` : ''}</div></li>`).join('')}</ol><p class="batch-record-id">ID пакета: ${esc(record.id)}</p><div class="toolbar"><a class="button secondary" href="#reports?batch=${encode(record.id)}">Расход пакета</a>${record.completed ? `<a class="button secondary" href="#submission?batch=${encode(record.id)}">Подготовить сдачу</a>` : ''}</div></section>` : '<div class="panel" role="status">Нет данных пакета</div>'}`;
     if (focused) host.querySelector(`[data-batch-view="${focused}"]`)?.focus({preventScroll: true});
     else if (focusedLink) [...host.querySelectorAll('a[href]')].find(link => link.getAttribute('href') === focusedLink)?.focus({preventScroll: true});
   }
@@ -299,6 +369,11 @@ export async function mountBatches(host, {batchId} = {}) {
     if (batchId) {
       if (action === 'refresh') await controller.refresh(batchId).catch(() => {});
       if (action === 'cancel') await controller.cancel().catch(() => {});
+      if (action === 'resume-batch') {
+        const hadFocus = document.activeElement === button;
+        await controller.resumeBatch().catch(() => {});
+        if (active() && hadFocus && (document.activeElement === document.body || document.activeElement?.dataset.batchView === action)) host.querySelector('#batch-status')?.focus({preventScroll: true});
+      }
     } else {
       if (action === 'refresh') page = 0;
       if (action === 'prev') page = Math.max(0, page - 1);

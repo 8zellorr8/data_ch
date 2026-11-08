@@ -7,7 +7,8 @@ const roles = { client: 'Клиент', operator: 'Оператор', bot: 'Бо
 const evidenceNames = { present: 'Подтверждение', missing: 'Контекст отсутствующего действия', not_applicable: 'Не применимо' };
 const encode = encodeURIComponent;
 const E = (id) => `/api/v1/evaluations/${encode(id)}`;
-const errorText = (error) => ({
+const waitUntilText = deadline => new Intl.DateTimeFormat('ru-RU', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'}).format(deadline);
+const errorText = (error) => Number.isFinite(error.retryUntil) ? `Сервис модели запросил паузу до ${waitUntilText(error.retryUntil)}. Исходный запрос сохранён; новая оценка автоматически не запускается.` : ({
   AI_NOT_CONFIGURED: 'Модель ещё не подключена. Вы можете провести ручную оценку — она сохранится с отдельной отметкой.',
   AI_UNAVAILABLE: 'Сервис модели сейчас недоступен. Проверьте историю перед повторным запуском.',
   AI_TIMEOUT: 'Модель не ответила вовремя. Проверьте историю перед повторным запуском.',
@@ -31,14 +32,14 @@ const isProblem = (criterion, answer) => {
 
 export async function mountReview(container, { conversationId, evaluationId, checklistId, checklistVersion, newEvaluation = false, onSelectionChanged = () => {}, onEditChecklist = () => {}, onBack = () => {}, onChanged = () => {} } = {}) {
   let alive = true, conversation, checklists = [], checklist, evaluation = null, history = [], historyTotal = 0;
-  let busy = false, pageError = '', loadingChecklist = false, loadingHistory = false, modalState = null, ticker = null;
+  let busy = false, pageError = '', loadingChecklist = false, loadingHistory = false, modalState = null, ticker = null, cooldownTimer = null;
   let aiConfigured = false, criterionFilter = 'all', evidenceReturn = null;
   const server = getApiBase();
   function ensureServer() {
     if (!alive || getApiBase() !== server) throw new Error('Адрес сервера изменился. Откройте диалог заново перед сохранением.');
   }
   const api = (path, options = {}) => { ensureServer(); return requestApi(path, {...options, base:server}); };
-  const cleanup = () => { modalState?.flushDraft?.(); alive = false; clearInterval(ticker); if (modalState) modalState.modal.close(); container.removeEventListener('click', click); container.removeEventListener('change', change); window.removeEventListener('beforeunload', unload); };
+  const cleanup = () => { modalState?.flushDraft?.(); alive = false; clearInterval(ticker); clearTimeout(cooldownTimer); if (modalState) modalState.modal.close(); container.removeEventListener('click', click); container.removeEventListener('change', change); window.removeEventListener('beforeunload', unload); };
   cleanup.canLeave = () => {
     if (busy || modalState?.saving) { toast('Дождитесь завершения текущего запроса.', 'error'); return false; }
     if (modalState?.flushDraft && modalState.flushDraft()) return true;
@@ -90,6 +91,32 @@ export async function mountReview(container, { conversationId, evaluationId, che
       <div data-manual-draft-banner>${manualDraftBanner()}</div>
       <div class="review-workspace"><section class="panel transcript-panel" aria-label="Транскрипт диалога"><div class="review-panel-heading"><h2>Диалог</h2><span class="muted">${evaluation ? 'Снимок на момент оценки' : 'Исходный текст'}</span></div>${audio ? `<div class="review-audio"><audio controls preload="none" src="${esc(audio)}" aria-label="Запись звонка"></audio><a href="${esc(audio)}" target="_blank" rel="noopener noreferrer">Открыть запись</a><p class="muted">Цитаты ведут к тексту. Позиция в аудио не синхронизирована.</p></div>` : source.channel === 'voice call' ? '<div class="notice">Аудиозапись не приложена. Доступен транскрипт звонка.</div>' : ''}<div class="transcript-scroll" tabindex="0" role="region" aria-label="Сообщения диалога"><div class="evidence-return"><button class="button secondary small" type="button" data-action="return-evidence" hidden>Вернуться к критерию ${icon('arrow')}</button></div>${source.transcript.map(m => `<article class="message message-${esc(m.speaker)}" id="message-${esc(m.id)}" data-message-id="${esc(m.id)}" tabindex="-1"><div class="message-meta"><strong>${esc(roles[m.speaker] || m.speaker)}</strong><span>${esc(m.timestamp)}</span><span class="message-id">${esc(m.id)}</span></div><p class="message-text">${esc(m.text)}</p></article>`).join('')}</div></section>
       <section class="panel evaluation-panel" aria-label="Оценка диалога"><div class="review-panel-heading"><h2>Результат проверки</h2><span class="badge">${historyTotal} в истории</span></div><div class="review-history"><label class="field">История оценок<select data-select="history" ${busy || loadingHistory || loadingChecklist ? 'disabled' : ''}><option value="" ${!evaluation ? 'selected' : ''}>Новая проверка</option>${evaluation && !history.some(h => h.id === evaluation.id) ? `<option value="${esc(evaluation.id)}" selected>${esc(dateText(evaluation.created_at))} · ${evaluation.origin === 'manual' ? 'Вручную' : 'AI'} · ${esc(scoreText(evaluation.score.total))}</option>` : ''}${history.map(h => `<option value="${esc(h.id)}" ${evaluation?.id === h.id ? 'selected' : ''}>${esc(dateText(h.created_at))} · ${h.origin === 'manual' ? 'Вручную' : 'AI'} · ${esc(scoreText(h.score))}</option>`).join('')}</select></label>${history.length < historyTotal ? '<button class="button ghost" data-action="more-history">Ранние оценки</button>' : ''}</div><div data-review-result>${evaluation ? resultHTML(evaluation) : `<div class="review-empty"><h3>${historyTotal ? 'Новая оценка диалога' : 'Диалог ещё не оценён'}</h3><p>${historyTotal ? 'Предыдущие результаты доступны в истории. Выберите правила и явно запустите новую оценку.' : 'Выберите чек-лист и запустите оценку. Здесь появятся результаты по критериям и цитаты из диалога.'}</p><div class="notice">Для самостоятельной проверки нажмите «Оценить вручную»</div></div>`}</div></section></div></div>`;
+    updateCooldownControls();
+  }
+
+  function cooldownDeadline() {
+    try { return findOperation(operationScope('ai'))?.error?.retryUntil || 0; }
+    catch { return 0; } // The operation banner reports storage failures.
+  }
+  function cooldownText(deadline) {
+    return deadline > Date.now()
+      ? `Ожидание до ${waitUntilText(deadline)}. После паузы новую оценку нужно запустить вручную. Проверка исходного запроса не запускает модель повторно.`
+      : 'Указанное время ожидания прошло. Проверьте историю и расход перед отдельной новой оценкой. Автоматического запуска нет.';
+  }
+  function updateCooldownControls() {
+    clearTimeout(cooldownTimer);
+    if (!alive || getApiBase() !== server) return;
+    const deadline = cooldownDeadline(), waiting = deadline > Date.now();
+    const aiButton = container.querySelector('[data-action="ai"]');
+    if (aiButton) aiButton.disabled = busy || loadingHistory || loadingChecklist || !checklist || !aiConfigured || waiting;
+    const discard = container.querySelector('[data-action="discard-operation"][data-kind="ai"]');
+    if (discard) discard.disabled = busy || loadingHistory || loadingChecklist || waiting;
+    container.querySelectorAll('[data-cooldown-deadline]').forEach(el => {
+      el.textContent = cooldownText(Number(el.dataset.cooldownDeadline));
+      const heading = el.closest('.operation-notice')?.querySelector('strong');
+      if (heading) heading.textContent = `AI-оценка: ${waiting ? 'ожидание лимита' : 'сохранён запрос'}`;
+    });
+    if (waiting) cooldownTimer = setTimeout(updateCooldownControls, Math.min(deadline - Date.now() + 100, 2147483647));
   }
 
   function resultHTML(result) {
@@ -142,6 +169,7 @@ export async function mountReview(container, { conversationId, evaluationId, che
     if (action === 'recover-operation') return recoverOperation(button.dataset.kind);
     if (action === 'discard-operation') {
       const op = findOperation(operationScope(button.dataset.kind));
+      if (button.dataset.kind === 'ai' && op?.error?.retryUntil > Date.now()) return;
       if (op && confirm('Сначала проверьте историю и расход. Начатый запрос может ещё выполняться. Разрешить отдельную новую оценку?')) { clearOperation(op); render(); }
       return;
     }
@@ -191,7 +219,7 @@ export async function mountReview(container, { conversationId, evaluationId, che
     loadingChecklist = false; render();
   }
   async function evaluateAI() {
-    if (busy || loadingHistory || loadingChecklist || !checklist || !aiConfigured) return;
+    if (busy || loadingHistory || loadingChecklist || !checklist || !aiConfigured || cooldownDeadline() > Date.now()) return;
     busy = true; pageError = ''; render(); const started = Date.now();
     ticker = setInterval(() => { const el = container.querySelector('[data-progress]'); if (el) el.textContent = `Модель анализирует диалог · ${Math.floor((Date.now() - started) / 1000)} с`; }, 1000);
     try {
@@ -211,7 +239,8 @@ export async function mountReview(container, { conversationId, evaluationId, che
       return ['ai','manual'].map(kind => {
         const op = findOperation(operationScope(kind));
         if (!op) return '';
-        return `<div class="notice operation-notice"><div><strong>${kind === 'manual' ? 'Ручная оценка' : 'AI-оценка'}: сохранён запрос</strong><p>${esc(op.error?.message || 'Результат ещё не подтверждён в интерфейсе. Можно восстановить его с прежним ключом, даже после перезагрузки.')} Правила: ${esc(op.body.checklist_id)} · v${esc(op.body.checklist_version)}</p>${op.error?.executionId ? `<p>Запуск для отчёта расходов: <code>${esc(op.error.executionId)}</code> · <a href="#reports?execution=${encode(op.error.executionId)}">Проверить расход</a></p>` : ''}</div><div class="toolbar"><button class="button secondary" data-action="recover-operation" data-kind="${kind}" ${busy ? 'disabled' : ''}>Восстановить результат</button><button class="button ghost" data-action="discard-operation" data-kind="${kind}" ${busy ? 'disabled' : ''}>Разрешить новую оценку</button></div></div>`;
+        const deadline = kind === 'ai' && Number.isFinite(op.error?.retryUntil) ? op.error.retryUntil : null;
+        return `<div class="notice operation-notice"><div><strong>${kind === 'manual' ? 'Ручная оценка' : 'AI-оценка'}: ${deadline > Date.now() ? 'ожидание лимита' : 'сохранён запрос'}</strong><p>${esc(op.error?.message || 'Результат ещё не подтверждён в интерфейсе. Можно восстановить его с прежним ключом, даже после перезагрузки.')} Правила: ${esc(op.body.checklist_id)} · v${esc(op.body.checklist_version)}</p>${deadline !== null ? `<p data-cooldown-deadline="${deadline}" role="status">${esc(cooldownText(deadline))}</p>` : ''}${op.error?.executionId ? `<p>Запуск для отчёта расходов: <code>${esc(op.error.executionId)}</code> · <a href="#reports?execution=${encode(op.error.executionId)}">Проверить расход</a></p>` : ''}</div><div class="toolbar"><button class="button secondary" data-action="recover-operation" data-kind="${kind}" ${busy ? 'disabled' : ''}>${deadline !== null ? 'Проверить исходный запрос' : 'Восстановить результат'}</button><button class="button ghost" data-action="discard-operation" data-kind="${kind}" ${busy || deadline > Date.now() ? 'disabled' : ''}>Разрешить новую оценку</button></div></div>`;
       }).join('');
     } catch (error) { return `<div class="notice error" role="alert">${esc(error.message)}</div>`; }
   }

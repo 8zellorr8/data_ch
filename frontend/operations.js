@@ -62,7 +62,9 @@ export function createOperationStore({storage, getBase = getApiBase, request = a
       try { write({...pending, status:'succeeded', resultId:result.id, error:undefined}); } catch { /* Original key is already durable. */ }
       return result;
     } catch (error) {
-      try { write({...pending, status:'error', error:{code:error.code, message:error.message, status:error.status, executionId:error.executionId || pending.error?.executionId, requestId:error.requestId || pending.error?.requestId}}); } catch { /* Keep original key for recovery. */ }
+      const retryUntil = Math.max(error.retryUntil || 0, pending.error?.retryUntil || 0) || null;
+      if (retryUntil !== null) error.retryUntil = retryUntil;
+      try { write({...pending, status:'error', error:{code:error.code, message:error.message, status:error.status, executionId:error.executionId || pending.error?.executionId, requestId:error.requestId || pending.error?.requestId, retryUntil}}); } catch { /* Keep original key for recovery. */ }
       throw error;
     }
   }
