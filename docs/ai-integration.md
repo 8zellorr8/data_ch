@@ -9,8 +9,7 @@
 Класс с `configured = True` и методом:
 
 ```python
-async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
-    ...
+async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput: ...
 ```
 
 Типы уже находятся в `backend/evaluator.py` и `backend/models.py`. `context.conversation` содержит текст каждого сообщения, его `id`, роль и время, язык, канал и необязательную ссылку на аудио. `context.checklist` содержит конкретную версию, общие правила и все критерии с весами, шкалами, N/A и адаптацией звонков `call_rule`.

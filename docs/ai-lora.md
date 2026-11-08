@@ -1,18 +1,20 @@
-# Локальное обучение оценки чатов
+# Локальное обучение Qwen4B
 
-Текущая модель — `Qwen/Qwen3-1.7B`, QLoRA NF4 с PEFT (`r=8`, `alpha=16`, `q_proj` и `v_proj`, dropout 0.05). Обучаются только адаптеры; база заморожена. Порядок соответствует [PEFT Quicktour](https://huggingface.co/docs/peft/quicktour): загрузить базу, создать `LoraConfig`, применить `get_peft_model`, обучить и сохранить адаптер. Новых вызовов платного API для этого запуска нет.
+Текущая база — [Qwen3-4B-Instruct-2507 в NF4](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-bnb-4bit), revision `f12db89cd5156e090618dded9b4367f23f8f3b33`. QLoRA обучает 16 515 072 параметра: `r=8`, `alpha=16`, dropout 0.05, все линейные слои. Веса базы заморожены. Применяется [PEFT Quicktour](https://huggingface.co/docs/peft/quicktour): `LoraConfig` → `get_peft_model` → обучение → `save_pretrained`. Это дообучение открытой модели, а не изменение Gemini.
 
-## Данные
+Обучение завершено на RTX 3050 Laptop 6GB: 3 эпохи, 36 шагов за 1589,27 секунды. Пиковая выделенная память 4156 MiB, loss validation 1,5998 → 0,4671. Падение loss не доказывает качество оценок; [сравнение с базой и частотным прогнозом](ai-local-4b-validation.json) содержит выявленные ошибки.
 
-Используются имеющиеся предварительные метки по `invoke.json`: 60 текстовых диалогов (30 RU, 15 KZ, 15 EN) и пять RU-транскриптов звонков. Первый источник — `data/labels/expanded-drafts`, недостающие пять звонков берутся из `data/labels/lite-final-medium`. Первые метки составил ассистент, метки звонков — предыдущий Gemini. Это **не экспертный эталон**. Новая платная разметка aijuju не запрашивается.
+## Данные и разделение
 
-Один пример содержит весь диалог и восемь ответов: значения, ID подтверждающих реплик и обоснования. Адаптер извлекает цитаты из исходных сообщений. Это исключает ошибки копирования текста, но не доказывает смысловую уместность выбранной реплики.
+Использованы 60 текстовых диалогов из `invoke.json`: 30 RU, 15 KZ, 15 EN. Предварительные метки уже находились в `data/labels/expanded-drafts`. Новых платных запросов для них не делалось. Это не экспертная разметка. Пять RU-транскриптов звонков не включены в обучение; проверка на них отдельно дала только 20/40 совпадений.
 
-Числовые номера сценариев, кратные пяти, отложены: 52 диалога обучают модель, 13 проверяют. Все критерии диалога и совпадающие числовые номера разных языков/каналов находятся в одном разделе. Семантические дубликаты отдельно не проверены. Validation используется для выбора checkpoint, поэтому это предварительная проверка, а не независимый тест.
+48 чатов обучают модель, 12 отложены. Числовые номера, кратные пяти, во всех языках относятся к validation; остальные — train. Совпадающие полные тексты между разделами не найдены. Семантическая независимость сценариев не доказана. Validation использована для выбора эпохи и профиля промпта, отдельного test нет.
+
+Один пример содержит весь диалог и восемь значений, ID реплик и короткие обоснования. Цитаты восстанавливаются по ID из оригинала. JSON и цитирование проверяются backend. Дословность цитаты не гарантирует её смысловую уместность.
 
 ## Окружение
 
-Проверено: Windows, RTX 3050 Laptop 6GB, Python 3.12, PyTorch 2.7.1 CUDA 12.6. ML-зависимости отделены от backend:
+Проверено: Windows, Python 3.12, PyTorch 2.7.1 CUDA 12.6. ML-библиотеки отделены от CPU-backend:
 
 ```powershell
 uv venv --python 3.12 .venv-train
@@ -21,30 +23,36 @@ uv pip install --python .venv-train\Scripts\python.exe torch==2.7.1 --index-url 
 uv pip install --python .venv-train\Scripts\python.exe -r requirements-training.txt
 ```
 
-Для другой платформы выберите CUDA-сборку по [инструкции PyTorch](https://pytorch.org/get-started/locally/). Скачайте базовые файлы из [официального репозитория Qwen](https://huggingface.co/Qwen/Qwen3-1.7B) в `data/models/qwen3-1.7b/`. Код не отправляет диалоги и адаптер на Hub.
+Версии закреплены в `requirements-training.txt`. Для другой платформы выберите CUDA-сборку по [PyTorch](https://pytorch.org/get-started/locally/). Установите базу и адаптер по [инструкции backend](ai-local-handoff.md). Никакие диалоги автоматически на Hugging Face не публикуются.
 
-## Сборка и обучение
+## Воспроизведение
+
+Владелец располагает замороженными проверенными черновиками в `data/local-finetune-20261108-qwen4b/dataset-compact/references`. Эта папка содержит реальные данные и исключена из Git. Результат повторной сборки совпал с исходным обучением по SHA-256:
+
+| Файл | SHA-256 |
+| --- | --- |
+| train.jsonl | `c329a6458a5f3a97ca0c5a3a413855d409320c19632cfc4bd573c2efc6c66b3b` |
+| validation.jsonl | `38f809fc7a0d5d9b0a2dbca56f958999fd99d3917f2954560ef01330da1ffac3` |
 
 ```powershell
-.\.venv-train\Scripts\python.exe -m ai.compact --drafts data/labels/expanded-drafts data/labels/lite-final-medium --out data/labels/compact-sft
-.\.venv-train\Scripts\python.exe -m ai.train_lora --train data/labels/compact-sft/train.jsonl --validation data/labels/compact-sft/validation.jsonl --model data/models/qwen3-1.7b --output data/lora/qwen3-1.7b-compact --device cuda --load-in-4bit --epochs 3 --max-length 9728 --grad-accum 1
+.\.venv-train\Scripts\python.exe -m ai.compact --drafts data/local-finetune-20261108-qwen4b/dataset-compact/references --out data/reproduce-4b-dataset
+.\.venv-train\Scripts\python.exe -m ai.train_lora --train data/reproduce-4b-dataset/train.jsonl --validation data/reproduce-4b-dataset/validation.jsonl --model data/models/qwen3-4b-instruct-2507-nf4 --output data/lora/qwen3-4b-retrained --device cuda --load-in-4bit --epochs 3 --max-length 3712 --grad-accum 4 --gpu-memory-fraction 0.8 --target-modules all-linear --optimizer adamw_bnb_8bit --warmup-steps 4 --scheduler cosine --cpu-threads 2
 ```
 
-Максимальная длина текущего примера — 9703 токена. Скрипт прекращает запуск, если пример пришлось бы обрезать. BF16, gradient checkpointing, NF4 и небольшие блоки вычисления loss позволяют вместить самый длинный пример в 6 ГБ. Процесс ограничен 85% памяти GPU. Для PyTorch 2.7 на Windows используется memory-efficient SDPA с явным повторением KV: native GQA иначе выбирает режим с квадратичной памятью. Настройки привязаны к версиям `requirements-training.txt`.
+Это повторно запустит обучение: для использования уже готового адаптера команда не нужна. На первом обучении использовалась изолированная копия этого процесса; общий CLI поддерживает те же параметры. Побитовая идентичность новой тренировки не гарантируется.
 
-Результат: `data/lora/qwen3-1.7b-compact/adapter/`. Соседний `training-manifest.json` содержит SHA-256 данных, разделение, шаги, параметры и метрики. Нулевой `baseline-adapter/` сохраняется до обучения для сравнения с той же базой. Данные и веса находятся вне Git.
+Используются NF4 double quantization, BF16, gradient checkpointing без reentrant, AdamW 8bit, learning rate 1e-4, seed 42 и небольшие блоки вычисления loss. Проверка останавливает обучение при нечисловом loss/градиенте. Длинные пути Windows обходятся загрузкой JSONL в память. Ни один обучающий пример не обрезается: самый длинный — 3587 токенов, лимит — 3712. SDPA использует экономный CUDA-режим с повторением KV вместо native GQA, который на этой версии иначе превышает память.
+
+`adapter/` содержит обученные веса и tokenizer; соседний `training-manifest.json` хранит параметры, хеши данных, разделение и метрики. В релизном манифесте дополнительно заданы профиль `guarded`, порядок полей JSON, лимит пояснения 180 символов и чтение длинных входов блоками 512. Для свежего адаптера профиль и качество нужно проверять заново.
 
 ## Проверка
 
 ```powershell
-.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-1.7b-compact/adapter --validation data/labels/compact-sft/validation.jsonl --drafts data/labels/compact-sft/references --output data/lora/qwen3-1.7b-compact/evaluation.json --device cuda --max-new-tokens 2048
-.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-1.7b-compact/baseline-adapter --validation data/labels/compact-sft/validation.jsonl --drafts data/labels/compact-sft/references --output data/lora/qwen3-1.7b-compact/baseline-evaluation.json --device cuda --max-new-tokens 2048
+.\.venv-train\Scripts\python.exe -m ai.evaluate_lora --adapter data/lora/qwen3-4b-cqa/adapter --validation data/reproduce-4b-dataset/validation.jsonl --drafts data/reproduce-4b-dataset/references --output data/lora/qwen3-4b-cqa/recheck.json --device cuda --max-new-tokens 1280
 ```
 
-Проверка использует настоящий `LocalLoRAEvaluator`: генерация по JSON Schema, восстановление цитат, проверка шкал и расчёт backend. Отчёт включает покрытие, совпадения с черновиками, N/A, MAE и время. Ошибки остаются в знаменателе покрытия. `.generations.json` содержит реальные генерации и остаётся локально.
+Эта команда создаёт новые локальные генерации и не обращается к платному API. Ошибки остаются в знаменателе покрытия. Полные генерации содержат реальные тексты и сохраняются только локально. Агрегаты находятся в [ai-local-4b-validation.json](ai-local-4b-validation.json).
 
-Подключение: [ai-local-handoff.md](ai-local-handoff.md).
+На 12 текстовых чатах: база без адаптера с тем же защищённым промптом — 11/12 допустимых, 62/96 совпадений с учётом ошибки; обученный адаптер — 12/12, 77/96, MAE 11,03. Частотный прогноз — 76/96, MAE 12,35. Для звонков качество заметно слабее. Четыре синтетических контроля пройдены вместе с фильтром команд изменения оценок; устойчивость к произвольному prompt injection не доказана. Продуктовый FAQ и анализ аудио отсутствуют.
 
-## Предыдущий эксперимент
-
-7 ноября Qwen3-0.6B обучалась по одному критерию на 384 примерах, 96 шагов за 15 минут 27 секунд. Loss снизился с 1.8341 до 0.3150, но лишь 3 из 12 свободных полных генераций прошли проверку; MAE на этих трёх — 39.91. Эта версия не выбрана для нового запуска. Снижение loss само по себе не подтверждает правильность оценки обслуживания.
+Предыдущие 0.6B и 1.7B не выбраны: 0.6B давала мало допустимых свободных JSON, 1.7B свелась к одному набору оценок на 12 текстовых чатах. Обучение на одних черновиках не заменяет экспертного эталона. Текущий результат требует проверки человеком перед сдачей.

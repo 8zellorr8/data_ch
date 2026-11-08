@@ -13,7 +13,8 @@ from backend.evaluator import EvaluationContext, EvaluatorOutput
 from backend.models import EvaluationResult
 from backend.scoring import validate_result
 
-from .compact import COMPACT_VERSION, compact_prompt, compact_schema, expand_compact
+from .compact import compact_schema, expand_compact
+from .local_policy import PROFILES, mark_input_review, messages_for, version_for
 from .prompt import PROMPT_VERSION, build_prompt
 
 
@@ -33,6 +34,8 @@ class LocalLoRAFailure(DomainError):
 
 
 class LocalLoRAEvaluator:
+    local_only = True
+
     def __init__(
         self,
         adapter: Path,
@@ -63,6 +66,12 @@ class LocalLoRAEvaluator:
         self._max_length = 2560
         self._enforcer_data: Any = None
         self._format = "criterion"
+        self._prompt_profile = "legacy"
+        self._force_json_order = False
+        self._max_explanation_chars = 1000
+        self._last_output_tokens: int | None = None
+        self._prefill_chunk_size = 0
+        self._prefill_threshold = 4096
         self.thinking_level = "disabled"
         self.prompt_version = f"{PROMPT_VERSION}:criterion"
 
@@ -73,6 +82,16 @@ class LocalLoRAEvaluator:
         if not manifest_path.is_file():
             raise DomainError("AI_NOT_CONFIGURED", "Local adapter training manifest is missing")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        inference = manifest.get("inference", {})
+        self._prompt_profile = inference.get("prompt_profile", "legacy")
+        if self._prompt_profile not in PROFILES:
+            raise DomainError("AI_NOT_CONFIGURED", "Unknown adapter prompt profile")
+        self._force_json_order = bool(inference.get("force_json_field_order", False))
+        self._max_explanation_chars = int(inference.get("max_explanation_chars", 1000))
+        self._prefill_chunk_size = int(inference.get("prefill_chunk_size", 0))
+        self._prefill_threshold = int(inference.get("prefill_threshold", 4096))
+        if not 20 <= self._max_explanation_chars <= 1000:
+            raise DomainError("AI_NOT_CONFIGURED", "Invalid adapter explanation limit")
         self._format = manifest.get("label_manifest", {}).get("example_format", "")
         if self._format not in {"criterion", "compact_dialogue"}:
             raise DomainError("AI_NOT_CONFIGURED", "Unsupported local adapter example format")
@@ -97,7 +116,9 @@ class LocalLoRAEvaluator:
             from .torch_attention import enable_efficient_attention
 
             enable_efficient_attention()
-            torch.cuda.set_per_process_memory_fraction(0.85)
+            torch.cuda.set_per_process_memory_fraction(
+                float(manifest.get("gpu_memory_fraction", 0.85))
+            )
             torch.set_float32_matmul_precision("high")
         dtype = (
             torch.bfloat16
@@ -139,10 +160,10 @@ class LocalLoRAEvaluator:
         if self._tokenizer.pad_token is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
         self._torch = torch
-        self._max_length = int(manifest["max_length"])
+        self._max_length = int(inference.get("max_input_tokens", manifest["max_length"]))
         if self._format == "compact_dialogue":
-            self.model = "local-qwen3-1.7b-cqa-qlora"
-            self.prompt_version = COMPACT_VERSION
+            self.model = str(manifest.get("evaluator_model", "local-qwen3-1.7b-cqa-qlora"))
+            self.prompt_version = version_for(self._prompt_profile)
 
     def warmup(self) -> None:
         with self._lock:
@@ -153,14 +174,9 @@ class LocalLoRAEvaluator:
     ) -> tuple[list[str], int]:
         prompts = [
             self._tokenizer.apply_chat_template(
-                [
-                    {
-                        "role": "user",
-                        "content": compact_prompt(selection)
-                        if self._format == "compact_dialogue"
-                        else build_prompt(selection),
-                    }
-                ],
+                messages_for(selection, self._prompt_profile)
+                if self._format == "compact_dialogue"
+                else [{"role": "user", "content": build_prompt(selection)}],
                 tokenize=False,
                 add_generation_prompt=True,
                 enable_thinking=False,
@@ -194,16 +210,28 @@ class LocalLoRAEvaluator:
                 + "—–…«»“”₸€№"
             )
             config = parser_config.CharacterLevelParserConfig(
-                alphabet="".join(sorted(set(alphabet)))
+                alphabet="".join(sorted(set(alphabet))),
+                force_json_field_order=self._force_json_order,
             )
+            schema: Any = compact_schema(batch[0])
+            for properties in schema["properties"].values():
+                properties["properties"]["explanation"]["maxLength"] = self._max_explanation_chars
 
             constraints["prefix_allowed_tokens_fn"] = (
                 lmfe_transformers.build_transformers_prefix_allowed_tokens_fn(
                     self._enforcer_data,
-                    lmfe.JsonSchemaParser(compact_schema(batch[0]), config=config),
+                    lmfe.JsonSchemaParser(schema, config=config),
                 )
             )
         with self._torch.inference_mode():
+            if self.device == "cuda":
+                self._torch.cuda.empty_cache()
+            prefill = (
+                {"prefill_chunk_size": self._prefill_chunk_size}
+                if self._prefill_chunk_size
+                and encoded["input_ids"].shape[-1] > self._prefill_threshold
+                else {}
+            )
             generated = self._model.generate(
                 **encoded,
                 max_new_tokens=self.max_new_tokens,
@@ -211,10 +239,14 @@ class LocalLoRAEvaluator:
                 do_sample=False,
                 pad_token_id=self._tokenizer.pad_token_id,
                 logits_to_keep=1,
+                **prefill,
                 **constraints,
             )
         texts: list[str] = self._tokenizer.batch_decode(
             generated[:, encoded["input_ids"].shape[-1] :], skip_special_tokens=True
+        )
+        self._last_output_tokens = int(
+            (generated.shape[-1] - encoded["input_ids"].shape[-1]) * len(batch)
         )
         return texts, int(encoded["attention_mask"].sum().item())
 
@@ -234,6 +266,8 @@ class LocalLoRAEvaluator:
                     raise DomainError("AI_TIMEOUT", "Local QLoRA generation timed out")
                 try:
                     result = expand_compact(context, json.loads(extract_json(texts[0])))
+                    if self._prompt_profile == "guarded":
+                        mark_input_review(context, result)
                 except (ValueError, InvalidEvaluationResult):
                     raise LocalLoRAFailure(texts) from None
                 return EvaluatorOutput(
@@ -241,6 +275,7 @@ class LocalLoRAEvaluator:
                     model=self.model,
                     prompt_version=self.prompt_version,
                     input_tokens=count,
+                    output_tokens=self._last_output_tokens,
                     calls=1,
                     audio_analyzed=False,
                 ), texts

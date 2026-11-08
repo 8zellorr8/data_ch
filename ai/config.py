@@ -8,6 +8,7 @@ from backend.evaluator import EvaluationContext
 
 from .budget import TokenBudget
 from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, GeminiEvaluator
+from .http_worker import HTTPWorkerEvaluator
 from .local_lora import LocalLoRAEvaluator
 from .responses import ResponsesEvaluator
 
@@ -18,15 +19,15 @@ def build_evaluator(
     thinking_level: str | None = None,
     allow_voice_calls: bool | None = None,
     invalid_result_handler: Callable[[EvaluationContext, str, str, str], None] | None = None,
-) -> GeminiEvaluator | ResponsesEvaluator | LocalLoRAEvaluator:
+) -> GeminiEvaluator | ResponsesEvaluator | LocalLoRAEvaluator | HTTPWorkerEvaluator:
     provider = os.getenv("CQA_AI_PROVIDER", "gemini")
     if provider == "local-lora":
-        return LocalLoRAEvaluator(
-            Path(os.getenv("CQA_LORA_ADAPTER", "data/lora/qwen3-1.7b-compact/adapter")),
-            device=os.getenv("CQA_LORA_DEVICE", "auto"),
-            batch_size=1,
-            max_new_tokens=int(os.getenv("CQA_LORA_MAX_NEW_TOKENS", "2048")),
-            timeout=float(os.getenv("CQA_LORA_TIMEOUT_SECONDS", "150")),
+        return build_local_evaluator()
+    if provider == "local-http":
+        return HTTPWorkerEvaluator(
+            os.getenv("CQA_LOCAL_AI_URL", ""),
+            os.getenv("CQA_LOCAL_AI_KEY", ""),
+            timeout=float(os.getenv("CQA_LOCAL_AI_TIMEOUT_SECONDS", "210")),
         )
     if provider == "openai-compatible":
         return ResponsesEvaluator(
@@ -75,4 +76,14 @@ def build_evaluator(
         timeout=float(os.getenv("CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS", "15")),
         fallback_timeout=float(os.getenv("CQA_GEMINI_FALLBACK_TIMEOUT_SECONDS", "40")),
         invalid_result_handler=invalid_result_handler,
+    )
+
+
+def build_local_evaluator() -> LocalLoRAEvaluator:
+    return LocalLoRAEvaluator(
+        Path(os.getenv("CQA_LORA_ADAPTER", "data/lora/qwen3-4b-cqa/adapter")),
+        device=os.getenv("CQA_LORA_DEVICE", "auto"),
+        batch_size=1,
+        max_new_tokens=int(os.getenv("CQA_LORA_MAX_NEW_TOKENS", "2048")),
+        timeout=float(os.getenv("CQA_LORA_TIMEOUT_SECONDS", "180")),
     )
