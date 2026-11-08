@@ -17,6 +17,7 @@ from starlette.staticfiles import StaticFiles
 from .backup import BackupError, create_backup, manifest_path
 from .config import Settings
 from .evaluator import Evaluator
+from .hosted_auth import install_hosted_auth
 from .main import create_app
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ def create_hosted_app(*, evaluator: Evaluator | None = None) -> FastAPI:
             int(os.getenv("CQA_BACKUP_INTERVAL_SECONDS", "21600")),
         )
     app = create_app(settings, evaluator=evaluator)
+    install_hosted_auth(app)
     base_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
