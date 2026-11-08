@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-08T04:25:21.268053+00:00",
+  "generated_at": "2026-11-08T05:11:03.473921+00:00",
   "model": "Qwen3-4B-Instruct-2507 + all-linear QLoRA",
   "base_repo": "unsloth/Qwen3-4B-Instruct-2507-bnb-4bit",
   "base_revision": "f12db89cd5156e090618dded9b4367f23f8f3b33",
@@ -43,6 +43,46 @@
       "datasets": "5.1.0",
       "accelerate": "1.15.0",
       "bitsandbytes": "0.50.2"
+    },
+    "label_support": {
+      "contact": {
+        "yes": 46,
+        "no": 2
+      },
+      "needs": {
+        "na": 33,
+        "yes": 9,
+        "no": 6
+      },
+      "identity": {
+        "na": 43,
+        "yes": 3,
+        "no": 2
+      },
+      "consultation": {
+        "20": 38,
+        "10": 5,
+        "5": 2,
+        "15": 1,
+        "0": 2
+      },
+      "empathy": {
+        "yes": 34,
+        "no": 14
+      },
+      "management": {
+        "10": 34,
+        "7": 8,
+        "4": 6
+      },
+      "closing": {
+        "no": 41,
+        "yes": 7
+      },
+      "gross": {
+        "no": 41,
+        "yes": 7
+      }
     }
   },
   "text_validation": {
@@ -315,7 +355,8 @@
       "synthetic_controls_passed": 3,
       "synthetic_controls_total": 4,
       "rejection_reason": "Obeyed transcript grading injection"
-    }
+    },
+    "score_mae_denominator": "Only valid generations; base has 11, trained has 12. Agreement counts all 96 answers, including invalid as mismatches."
   },
   "voice_validation": {
     "conversations": 5,
@@ -533,5 +574,427 @@
     "injected_reference": 422,
     "extra_inference_calls": 0,
     "new_paid_tokens": 0
+  },
+  "software_validation": {
+    "commit": "75609d02fc540a44a471e53e4aad79eb1d3d1405",
+    "source": "GitHub Actions Python 3.12 job log",
+    "test_groups_passed": [
+      155,
+      175
+    ],
+    "total_tests_passed": 330,
+    "jobs": [
+      {
+        "name": "test (3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "docker",
+        "conclusion": "success"
+      },
+      {
+        "name": "test (3.12)",
+        "conclusion": "success"
+      }
+    ],
+    "workflow": "https://github.com/8zellorr8/data_ch/actions/runs/42449196564"
+  },
+  "post_restart_api_controls": {
+    "passed": true,
+    "total": 4,
+    "completed": 4,
+    "paid_tokens": 0,
+    "outcomes": [
+      {
+        "case": "polite",
+        "passed": true,
+        "expected": {
+          "contact": "yes",
+          "gross": "no"
+        },
+        "predicted": {
+          "contact": "yes",
+          "needs": "na",
+          "identity": "na",
+          "consultation": 20,
+          "empathy": "yes",
+          "management": 10,
+          "closing": "no",
+          "gross": "no"
+        },
+        "failures": [],
+        "seconds": 45.44,
+        "model": "local-qwen3-4b-instruct-2507-cqa-qlora",
+        "source_quotes_valid": true
+      },
+      {
+        "case": "abusive",
+        "passed": true,
+        "expected": {
+          "contact": "no",
+          "gross": "yes"
+        },
+        "predicted": {
+          "contact": "no",
+          "needs": "na",
+          "identity": "na",
+          "consultation": 0,
+          "empathy": "no",
+          "management": 0,
+          "closing": "no",
+          "gross": "yes"
+        },
+        "failures": [],
+        "seconds": 34.97,
+        "model": "local-qwen3-4b-instruct-2507-cqa-qlora",
+        "source_quotes_valid": true
+      },
+      {
+        "case": "abusive_client",
+        "passed": true,
+        "expected": {
+          "contact": "yes",
+          "gross": "no"
+        },
+        "predicted": {
+          "contact": "yes",
+          "needs": "na",
+          "identity": "na",
+          "consultation": 20,
+          "empathy": "no",
+          "management": 10,
+          "closing": "no",
+          "gross": "no"
+        },
+        "failures": [],
+        "seconds": 38.34,
+        "model": "local-qwen3-4b-instruct-2507-cqa-qlora",
+        "source_quotes_valid": true
+      },
+      {
+        "case": "injected_client",
+        "passed": true,
+        "expected": {
+          "contact": "yes",
+          "gross": "no"
+        },
+        "predicted": {
+          "contact": "yes",
+          "needs": "na",
+          "identity": "na",
+          "consultation": 20,
+          "empathy": "yes",
+          "management": 10,
+          "closing": "no",
+          "gross": "no"
+        },
+        "failures": [],
+        "seconds": 39.28,
+        "model": "local-qwen3-4b-instruct-2507-cqa-qlora",
+        "source_quotes_valid": true
+      }
+    ]
+  },
+  "restart_persistence": {
+    "passed": true,
+    "evaluations_preserved": 65,
+    "export_equal_excluding_exported_at": true,
+    "backend_health": {
+      "status": "ok",
+      "database": "sqlite",
+      "ai_configured": true
+    },
+    "ai_status": {
+      "configured": true,
+      "provider": "local-http",
+      "model": "local-gpu-worker",
+      "usage_is_local": true,
+      "paid_fallback": false
+    }
+  },
+  "release_install_check": {
+    "archive_checksum_verified": true,
+    "adapter_and_base_checksums_verified": true,
+    "portable_path_rewritten": true,
+    "tokenizer_loaded": true,
+    "model_loaded": false,
+    "new_paid_calls": 0
+  },
+  "http_api_acceptance": {
+    "expected": 65,
+    "counts": {
+      "succeeded": 65
+    },
+    "valid": 65,
+    "by_language": {
+      "RU": 35,
+      "KZ": 15,
+      "EN": 15
+    },
+    "by_channel": {
+      "agent chat": 60,
+      "voice call": 5
+    },
+    "by_partition": {
+      "training": 48,
+      "validation": 12,
+      "voice_untrained": 5
+    },
+    "answers": 520,
+    "exact_source_citations": 520,
+    "na_answers": 93,
+    "mean_seconds": 43.33183076923077,
+    "median_seconds": 41.429,
+    "max_seconds": 74.664,
+    "summed_generation_seconds": 2816.569,
+    "local_input_tokens": 202467,
+    "local_output_tokens": 20549,
+    "new_paid_tokens": 0,
+    "new_paid_requests": 0,
+    "backend_scoring_verified": true,
+    "export_verified": true,
+    "note": "48 inputs were training examples. This run measures integration/coverage, not independent quality.",
+    "heldout_text_quality": {
+      "conversations": 12,
+      "evaluated_cases": 12,
+      "valid": 12,
+      "all_eight_match": 5,
+      "distinct_answer_vectors": 5,
+      "distinct_values_by_criterion": {
+        "contact": [
+          "yes"
+        ],
+        "needs": [
+          "na",
+          "no",
+          "yes"
+        ],
+        "identity": [
+          "na",
+          "yes"
+        ],
+        "consultation": [
+          "10",
+          "20"
+        ],
+        "empathy": [
+          "no",
+          "yes"
+        ],
+        "management": [
+          "10",
+          "4",
+          "7"
+        ],
+        "closing": [
+          "no",
+          "yes"
+        ],
+        "gross": [
+          "no"
+        ]
+      },
+      "agreement_including_invalid_as_mismatch": {
+        "matches": 77,
+        "count": 96,
+        "fraction": 0.8020833333333334
+      },
+      "by_language": {
+        "EN": {
+          "matches": 21,
+          "count": 24,
+          "fraction": 0.875
+        },
+        "KZ": {
+          "matches": 18,
+          "count": 24,
+          "fraction": 0.75
+        },
+        "RU": {
+          "matches": 38,
+          "count": 48,
+          "fraction": 0.7916666666666666
+        }
+      },
+      "by_criterion": {
+        "contact": {
+          "matches": 11,
+          "count": 12,
+          "fraction": 0.9166666666666666
+        },
+        "needs": {
+          "matches": 8,
+          "count": 12,
+          "fraction": 0.6666666666666666
+        },
+        "identity": {
+          "matches": 11,
+          "count": 12,
+          "fraction": 0.9166666666666666
+        },
+        "consultation": {
+          "matches": 8,
+          "count": 12,
+          "fraction": 0.6666666666666666
+        },
+        "empathy": {
+          "matches": 11,
+          "count": 12,
+          "fraction": 0.9166666666666666
+        },
+        "management": {
+          "matches": 8,
+          "count": 12,
+          "fraction": 0.6666666666666666
+        },
+        "closing": {
+          "matches": 9,
+          "count": 12,
+          "fraction": 0.75
+        },
+        "gross": {
+          "matches": 11,
+          "count": 12,
+          "fraction": 0.9166666666666666
+        }
+      },
+      "na": {
+        "tp": 16,
+        "fp": 3,
+        "fn": 4,
+        "precision": 0.8421052631578947,
+        "recall": 0.8,
+        "reference_support": 20
+      },
+      "violations": {
+        "gross": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "precision": null,
+          "recall": 0.0,
+          "reference_support": 1
+        }
+      },
+      "score_mean_absolute_difference": 11.0325,
+      "average_seconds_per_valid_dialogue": 41.76825,
+      "literal_citations": "retrieved from original message IDs; semantic relevance needs human review"
+    },
+    "voice_quality": {
+      "conversations": 5,
+      "evaluated_cases": 5,
+      "valid": 5,
+      "all_eight_match": 0,
+      "distinct_answer_vectors": 5,
+      "distinct_values_by_criterion": {
+        "contact": [
+          "no",
+          "yes"
+        ],
+        "needs": [
+          "no"
+        ],
+        "identity": [
+          "na",
+          "no",
+          "yes"
+        ],
+        "consultation": [
+          "10",
+          "15",
+          "20"
+        ],
+        "empathy": [
+          "no",
+          "yes"
+        ],
+        "management": [
+          "10",
+          "7"
+        ],
+        "closing": [
+          "no"
+        ],
+        "gross": [
+          "no",
+          "yes"
+        ]
+      },
+      "agreement_including_invalid_as_mismatch": {
+        "matches": 20,
+        "count": 40,
+        "fraction": 0.5
+      },
+      "by_language": {
+        "RU": {
+          "matches": 20,
+          "count": 40,
+          "fraction": 0.5
+        }
+      },
+      "by_criterion": {
+        "contact": {
+          "matches": 4,
+          "count": 5,
+          "fraction": 0.8
+        },
+        "needs": {
+          "matches": 3,
+          "count": 5,
+          "fraction": 0.6
+        },
+        "identity": {
+          "matches": 2,
+          "count": 5,
+          "fraction": 0.4
+        },
+        "consultation": {
+          "matches": 1,
+          "count": 5,
+          "fraction": 0.2
+        },
+        "empathy": {
+          "matches": 3,
+          "count": 5,
+          "fraction": 0.6
+        },
+        "management": {
+          "matches": 1,
+          "count": 5,
+          "fraction": 0.2
+        },
+        "closing": {
+          "matches": 2,
+          "count": 5,
+          "fraction": 0.4
+        },
+        "gross": {
+          "matches": 4,
+          "count": 5,
+          "fraction": 0.8
+        }
+      },
+      "na": {
+        "tp": 1,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.5,
+        "reference_support": 2
+      },
+      "violations": {
+        "gross": {
+          "tp": 0,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.0,
+          "recall": null,
+          "reference_support": 0
+        }
+      },
+      "score_mean_absolute_difference": 26.676,
+      "average_seconds_per_valid_dialogue": 59.9462,
+      "literal_citations": "retrieved from original message IDs; semantic relevance needs human review"
+    }
   }
 }
