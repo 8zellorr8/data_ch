@@ -1,7 +1,7 @@
 # Общая версия команды
 
-`codex/integration` — отдельная общая ветка frontend, backend и AI.
-Основа — `main` (`6947035`) с backend-core; объединены свежие
+`main` — общая ветка frontend, backend и AI. Интеграция начиналась с
+`main` (`6947035`) с backend-core. В неё вошли
 `codex/frontend-next` (`81c9065`) и `codex/ai-gemini` (`a1374ea`).
 История сохранена merge-коммитами, исходные ветки не переписываются.
 Основной AI подключается к aijuju API; локальная LoRA остаётся отдельным вариантом.
@@ -13,8 +13,8 @@
 
 ```text
 git fetch origin
-git switch codex/integration
-git pull --ff-only origin codex/integration
+git switch main
+git pull --ff-only origin main
 ```
 
 Если fast-forward невозможен, не выполняйте `reset --hard` или force push:
@@ -25,14 +25,14 @@ git pull --ff-only origin codex/integration
 Для новой задачи создайте ветку от общей версии:
 
 ```text
-git switch -c codex/my-task origin/codex/integration
+git switch -c codex/my-task origin/main
 ```
 
 Если продолжаете существующую ветку, находясь в ней, выполните:
 
 ```text
 git fetch origin
-git merge origin/codex/integration
+git merge origin/main
 ```
 
 После разрешения конфликтов запустите подходящие проверки. Не заменяйте целиком
@@ -46,7 +46,7 @@ git merge origin/codex/integration
 python -m pytest -q
 python -m ruff check backend ai scripts tests
 python -m ruff format --check backend ai scripts tests
-python -m mypy backend ai
+python -m mypy backend ai scripts/rehearse_backend.py
 npm --prefix frontend run check
 npm --prefix frontend test
 python -m unittest discover -s frontend/tests -p "test_*.py"
