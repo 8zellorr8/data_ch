@@ -162,7 +162,7 @@ class LocalLoRAEvaluator:
         self._torch = torch
         self._max_length = int(inference.get("max_input_tokens", manifest["max_length"]))
         if self._format == "compact_dialogue":
-            self.model = str(manifest.get("evaluator_model", "local-qwen3-1.7b-cqa-qlora"))
+            self.model = str(manifest.get("evaluator_model", self.model))
             self.prompt_version = version_for(self._prompt_profile)
 
     def warmup(self) -> None:
