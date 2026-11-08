@@ -14,7 +14,7 @@
     "credentials_in_git": false
   },
   "software_checks": {
-    "python_tests_passed": 419,
+    "python_tests_passed": 423,
     "frontend_node_tests_passed": 49,
     "frontend_proxy_tests_passed": 4,
     "ruff": true,
@@ -48,7 +48,8 @@
     "Applied durable 429 cooldowns to the aijuju adapter; uncertain earlier attempts cannot be automatically replayed.",
     "Unknown provider usage keeps its conservative token reservation.",
     "Frontend waits 250s, its optional proxy 245s, configured backend 240s.",
-    "AI status route precedes the catch-all frontend mount."
+    "AI status route precedes the catch-all frontend mount.",
+    "Container checks allow only the AI status extension and strictly compare the remaining backend API schema."
   ],
   "token_policy": {
     "shared_existing_ledger": true,

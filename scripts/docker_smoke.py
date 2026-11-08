@@ -94,8 +94,18 @@ def snapshot(client: httpx.Client, variables: dict) -> dict:
     return records
 
 
+def check_schema(actual: dict, expected: dict) -> None:
+    # ai.app adds one status endpoint to the otherwise identical backend API.
+    # Keep the strict comparison for every backend route and model component.
+    paths = dict(actual["paths"])
+    assert paths.pop("/api/v1/ai/status", None) is not None
+    assert {**actual, "paths": paths} == expected
+
+
 def check_api(client: httpx.Client, expected_schema: dict, variables: dict) -> None:
-    assert client.get("/openapi.json").json() == expected_schema
+    check_schema(client.get("/openapi.json").json(), expected_schema)
+    status = client.get("/api/v1/ai/status")
+    assert status.status_code == 200 and status.json()["configured"] is False
     assert client.get("/docs").status_code == 200
     assert client.get("/health").json() == {
         "status": "ok",
