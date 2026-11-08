@@ -76,12 +76,13 @@ def create_worker_app(evaluator: Evaluator | None = None, *, api_key: str | None
             import ctypes
 
             # A process-scoped request; no persistent power-plan changes.
-            ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
+            windows_library = getattr(ctypes, "windll")
+            windows_library.kernel32.SetThreadExecutionState(0x80000001)
         try:
             yield
         finally:
             if keep_awake:
-                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+                windows_library.kernel32.SetThreadExecutionState(0x80000000)
 
     application = FastAPI(title="Replimetr local GPU worker", lifespan=lifespan)
     application.state.evaluator = model
