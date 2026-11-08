@@ -76,7 +76,8 @@ def create_worker_app(evaluator: Evaluator | None = None, *, api_key: str | None
             import ctypes
 
             # A process-scoped request; no persistent power-plan changes.
-            windows_library = getattr(ctypes, "windll")
+            # ctypes exposes this loader only on Windows.
+            windows_library = vars(ctypes)["windll"]
             windows_library.kernel32.SetThreadExecutionState(0x80000001)
         try:
             yield
