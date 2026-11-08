@@ -16,7 +16,7 @@ test('lost response survives reload with the same durable key and exact body', a
   assert.equal((await second.sendOperation(recovered)).id,'saved');
   assert.equal(calls[0].headers['Idempotency-Key'],calls[1].headers['Idempotency-Key']);
   assert.deepEqual(calls[0].body,calls[1].body);assert.equal(calls[1].body.checklist_version,1);
-  assert.equal(calls[1].timeoutMs,185000);
+  assert.ok(calls[1].timeoutMs > 240000, 'client must outwait the integrated backend timeout');
   assert.equal(second.findOperation(op.scope).resultId,'saved');
   second.clearOperation(op);assert.equal(second.findOperation(op.scope),null);
 });

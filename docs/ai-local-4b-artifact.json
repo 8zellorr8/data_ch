@@ -1,0 +1,11 @@
+{
+  "artifact": "cqa-qwen3-4b-qlora.zip",
+  "bytes": 32441564,
+  "sha256": "7cc7957596ce431f97dc2353cb54e49e7574682d7b091180ebe085709f09e325",
+  "adapter_sha256": "15395faa2db09b5bd2d96e863d7f5b5d528d88af88e458b14366aaf04dab8727",
+  "base_repo": "unsloth/Qwen3-4B-Instruct-2507-bnb-4bit",
+  "base_revision": "f12db89cd5156e090618dded9b4367f23f8f3b33",
+  "setup": "docs/ai-local-handoff.md",
+  "quality": "docs/ai-local-4b-validation.json",
+  "private_repository_required": true
+}

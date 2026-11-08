@@ -1,16 +1,19 @@
 # Контракт для AI-участника
 
+В общей ветке `codex/integration` подключён aijuju API с `gemini-3.8-flash`.
+Актуальный единый запуск и ключи описаны в [integration.md](integration.md).
+Остальные варианты адаптеров ниже остаются доступными по явной настройке.
+
 Для Gemini есть адаптер в `ai/` и инструкция [запуска и разметки](ai-gemini.md). При запуске `backend.main:app` или без API-ключа работает `UnconfiguredEvaluator` либо незадействованный Gemini evaluator и автоматическая оценка возвращает 503; фиктивных автоматических оценок нет.
 
-Экспериментальный `ai.local_lora.LocalLoRAEvaluator` подключает локальный PEFT-адаптер через тот же контракт. Команда `python -m uvicorn ai.local_app:app --port 8001` запускает API с ним; нужны ML-зависимости, базовая модель и обученный адаптер. Восемь ответов генерируются отдельно и проходят общую проверку backend. Подготовка модели и ограничения предварительной разметки описаны в [ai-lora.md](ai-lora.md).
+`ai.local_lora.LocalLoRAEvaluator` подключает локальный PEFT-адаптер через тот же контракт. При `CQA_AI_PROVIDER=local-lora` команда `python -m uvicorn ai.app:app --env-file .env --port 8001 --workers 1` запускает API с ним; нужны ML-зависимости, базовая модель и обученный адаптер. Новый компактный адаптер возвращает все восемь ответов за одну генерацию. Цитаты извлекаются из исходных реплик, результат проверяет backend. Инструкция передачи backend-разработчику: [ai-local-handoff.md](ai-local-handoff.md).
 
 ## Что реализовать
 
 Класс с `configured = True` и методом:
 
 ```python
-async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput:
-    ...
+async def evaluate(self, context: EvaluationContext) -> EvaluatorOutput: ...
 ```
 
 Типы уже находятся в `backend/evaluator.py` и `backend/models.py`. `context.conversation` содержит текст каждого сообщения, его `id`, роль и время, язык, канал и необязательную ссылку на аудио. `context.checklist` содержит конкретную версию, общие правила и все критерии с весами, шкалами, N/A и адаптацией звонков `call_rule`.

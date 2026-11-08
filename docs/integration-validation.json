@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-08",
+  "branch": "codex/integration",
+  "sources": {
+    "main": "6947035624e888c136105a4483e069c20a2f4ca1",
+    "codex/backend-core": "695ab11784afa11f7111f1b2bd67b6dd9334eb01",
+    "codex/frontend-next": "81c90650e11ccf7628bd670a59138044dc6dba76",
+    "codex/ai-gemini": "a1374ea020a9ff79158912627c5995a8ddb68839"
+  },
+  "primary_ai": {
+    "provider": "openai-compatible",
+    "endpoint": "https://api.aijuju.rest/v1",
+    "model": "gemini-3.8-flash",
+    "credentials_in_git": false
+  },
+  "software_checks": {
+    "python_tests_passed": 419,
+    "frontend_node_tests_passed": 49,
+    "frontend_proxy_tests_passed": 4,
+    "ruff": true,
+    "ruff_format": true,
+    "mypy": true
+  },
+  "live_ui_to_provider": {
+    "model": "gemini-3.8-flash",
+    "answers": 8,
+    "input_tokens": 3231,
+    "output_tokens": 803,
+    "seconds": 11.86,
+    "new_provider_requests": 1,
+    "accounted_token_delta": 4034,
+    "score_computed_by_backend": true,
+    "quotes_validated": true,
+    "jury_reserve": 5191000,
+    "uncertain_requests": 0,
+    "provider_balance_verified": false,
+    "accuracy_measured": false
+  },
+  "after_restart": {
+    "frontend_served": true,
+    "status_route_available": true,
+    "provider_matches_request": true,
+    "saved_ai_evaluations_preserved": 1,
+    "additional_provider_calls": 0
+  },
+  "integration_fixes": [
+    "Preserved SQLite-backed request gates when selecting Gemini or aijuju.",
+    "Applied durable 429 cooldowns to the aijuju adapter; uncertain earlier attempts cannot be automatically replayed.",
+    "Unknown provider usage keeps its conservative token reservation.",
+    "Frontend waits 250s, its optional proxy 245s, configured backend 240s.",
+    "AI status route precedes the catch-all frontend mount."
+  ],
+  "token_policy": {
+    "shared_existing_ledger": true,
+    "new_reported_usage": 4034,
+    "new_requests": 1,
+    "uncertain_requests": 0,
+    "remaining_phase_budget": 995966,
+    "protected_jury_reserve": 5191000,
+    "provider_balance_verified": false,
+    "note": "Usage counters are not a verified provider-credit balance."
+  },
+  "accuracy_note": "One synthetic conversation verifies integration, not independent grading accuracy. Qwen metrics are separate."
+}

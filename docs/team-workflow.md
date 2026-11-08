@@ -1,9 +1,11 @@
 # Общая версия команды
 
-`main` — общая проверенная версия backend, frontend и AI. В неё включены
-`codex/backend-core`, frontend (`a0665cd`) и AI (`4c2c4e4`); история авторов
-сохранена merge-коммитами. Экспериментальная LoRA остаётся отдельной точкой входа,
-не устанавливает ML-зависимости в обычный backend и не включается автоматически.
+`codex/integration` — отдельная общая ветка frontend, backend и AI.
+Основа — `main` (`6947035`) с backend-core; объединены свежие
+`codex/frontend-next` (`81c9065`) и `codex/ai-gemini` (`a1374ea`).
+История сохранена merge-коммитами, исходные ветки не переписываются.
+Основной AI подключается к aijuju API; локальная LoRA остаётся отдельным вариантом.
+[Настройки и единый запуск](integration.md).
 
 ## Получить общий код
 
@@ -11,8 +13,8 @@
 
 ```text
 git fetch origin
-git switch main
-git pull --ff-only origin main
+git switch codex/integration
+git pull --ff-only origin codex/integration
 ```
 
 Если fast-forward невозможен, не выполняйте `reset --hard` или force push:
@@ -23,14 +25,14 @@ git pull --ff-only origin main
 Для новой задачи создайте ветку от общей версии:
 
 ```text
-git switch -c codex/my-task origin/main
+git switch -c codex/my-task origin/codex/integration
 ```
 
 Если продолжаете существующую ветку, находясь в ней, выполните:
 
 ```text
 git fetch origin
-git merge origin/main
+git merge origin/codex/integration
 ```
 
 После разрешения конфликтов запустите подходящие проверки. Не заменяйте целиком

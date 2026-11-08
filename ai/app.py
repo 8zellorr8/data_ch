@@ -1,40 +1,59 @@
-"""Gemini-backed local and hosted application entrypoints."""
+"""Configured cloud or local evaluator application entrypoints."""
 
+import asyncio
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
-from backend.config import Settings
-from backend.db import Repository
+from backend.evaluator import Evaluator
 from backend.hosting import create_hosted_app as create_backend_hosted_app
 from backend.main import create_app as create_backend_app
-from backend.rate_limits import RequestLimiter, SQLiteRateStore
 
-from .gemini import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, GeminiEvaluator
+from .config import build_evaluator as build_evaluator
+from .local_lora import LocalLoRAEvaluator
 
 
-def build_evaluator(*, persistent: bool = False) -> GeminiEvaluator:
-    settings = Settings()
-    store = (
-        SQLiteRateStore(Repository(settings.database_path, settings.database_timeout))
-        if persistent
-        else None
-    )
-    return GeminiEvaluator(
-        api_key=os.getenv("GEMINI_API_KEY", ""),
-        model=os.getenv("CQA_GEMINI_MODEL", DEFAULT_MODEL),
-        fallback_model=os.getenv("CQA_GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL or "") or None,
-        thinking_level=os.getenv("CQA_GEMINI_THINKING_LEVEL", DEFAULT_THINKING_LEVEL),
-        allow_voice_calls=os.getenv("CQA_GEMINI_ALLOW_VOICE_CALLS", "0") == "1",
-        timeout=float(os.getenv("CQA_GEMINI_PRIMARY_TIMEOUT_SECONDS", "15")),
-        fallback_timeout=float(os.getenv("CQA_GEMINI_FALLBACK_TIMEOUT_SECONDS", "40")),
-        request_gate=RequestLimiter(store, float(os.getenv("CQA_GEMINI_RPM", "3"))),
-    )
+def _warm_local(app: FastAPI, evaluator: object) -> FastAPI:
+    if isinstance(evaluator, LocalLoRAEvaluator) and evaluator.configured:
+        previous = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+            await asyncio.to_thread(evaluator.warmup)
+            async with previous(application):
+                yield
+
+        app.router.lifespan_context = lifespan
+    return app
 
 
 def create_hosted_app() -> FastAPI:
-    """Use the hosted frontend, snapshots, and queues with the Gemini evaluator."""
-    return create_backend_hosted_app(evaluator=build_evaluator(persistent=True))
+    """Use hosted frontend, snapshots and queues with the configured evaluator."""
+    evaluator = build_evaluator(persistent=True)
+    return _configured_app(create_backend_hosted_app(evaluator=evaluator), evaluator)
 
 
-app = create_backend_app(evaluator=build_evaluator(persistent=True))
+def _configured_app(application: FastAPI, evaluator: Evaluator) -> FastAPI:
+    status_router = APIRouter()
+
+    @status_router.get("/api/v1/ai/status")
+    async def ai_status() -> dict[str, object]:
+        local = bool(getattr(evaluator, "local_only", False))
+        return {
+            "configured": evaluator.configured,
+            "provider": os.getenv("CQA_AI_PROVIDER", "gemini"),
+            "model": str(getattr(evaluator, "model", "unconfigured")),
+            "usage_is_local": local,
+            "paid_fallback": False if local else None,
+        }
+
+    # The hosted app already has a catch-all frontend mount. Put this exact
+    # API route ahead of it so the frontend cannot turn AI status into a 404.
+    application.router.routes[0:0] = status_router.routes
+    return _warm_local(application, evaluator)
+
+
+_evaluator = build_evaluator(persistent=True)
+app = _configured_app(create_backend_app(evaluator=_evaluator), _evaluator)

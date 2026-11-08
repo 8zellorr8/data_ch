@@ -20,12 +20,23 @@ from .local_lora import LocalLoRAEvaluator, LocalLoRAFailure
 def evaluate_by_criterion(
     args: argparse.Namespace, manifest: dict[str, Any], drafts: dict[str, Any]
 ) -> None:
-    evaluator = LocalLoRAEvaluator(args.adapter, device=args.device, max_new_tokens=512)
+    compact = manifest.get("example_format") == "compact_dialogue"
+    evaluator = LocalLoRAEvaluator(
+        args.adapter,
+        device=args.device,
+        max_new_tokens=args.max_new_tokens if compact else 512,
+        timeout=150,
+    )
     compared: dict[str, int] = defaultdict(int)
     matches: dict[str, int] = defaultdict(int)
     errors = []
     outcomes = []
     generations = []
+    na_counts = {"true_positive": 0, "false_positive": 0, "false_negative": 0}
+    exact_quotes = 0
+    cold_started = time.perf_counter()
+    evaluator.warmup()
+    cold_start_seconds = round(time.perf_counter() - cold_started, 2)
     for cid in manifest["validation_conversation_ids"]:
         draft = drafts[cid]
         context = EvaluationContext(
@@ -53,6 +64,13 @@ def evaluate_by_criterion(
         for criterion, value in predicted.items():
             compared[criterion] += 1
             matches[criterion] += int(value == expected[criterion])
+            if value == "na" and expected[criterion] == "na":
+                na_counts["true_positive"] += 1
+            elif value == "na":
+                na_counts["false_positive"] += 1
+            elif expected[criterion] == "na":
+                na_counts["false_negative"] += 1
+        exact_quotes += sum(len(answer.evidence) for answer in output.result.answers)
         actual_score = calculate(context.checklist, output.result).total
         reference_score = calculate(context.checklist, reference).total
         if actual_score is not None and reference_score is not None:
@@ -66,6 +84,8 @@ def evaluate_by_criterion(
                 "reference": expected,
                 "predicted_score": actual_score,
                 "reference_score": reference_score,
+                "language": context.conversation.language,
+                "channel": context.conversation.channel,
             }
         )
         print(f"{cid}: valid, {seconds}s", flush=True)
@@ -77,9 +97,12 @@ def evaluate_by_criterion(
             cid: {"matches": matches[cid], "compared": count} for cid, count in compared.items()
         },
         "score_mae": sum(errors) / len(errors) if errors else None,
+        "na_counts": na_counts,
+        "validated_exact_quotes": exact_quotes,
+        "cold_start_seconds": cold_start_seconds,
         "reference_status": manifest.get("annotation_status_counts", {}),
         "device": evaluator.device,
-        "example_format": "criterion",
+        "example_format": manifest.get("example_format", "criterion"),
         "outcomes": outcomes,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +150,7 @@ def main() -> None:
         drafts[draft["conversation"]["conversation_id"]] = draft
     if any(cid not in drafts for cid in ids):
         parser.error("A held-out conversation is missing from the drafts directory")
-    if manifest.get("example_format") == "criterion":
+    if manifest.get("example_format") in {"criterion", "compact_dialogue"}:
         evaluate_by_criterion(args, manifest, drafts)
         return
     try:

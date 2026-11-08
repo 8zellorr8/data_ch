@@ -70,7 +70,7 @@ class FrontendHandler(SimpleHTTPRequestHandler):
         request = Request(self.upstream + self.path, data=data, headers=headers, method=self.command)
         try:
             try:
-                response = build_opener(NoRedirect()).open(request, timeout=190)
+                response = build_opener(NoRedirect()).open(request, timeout=245)
             except HTTPError as error:
                 response = error
             with response:

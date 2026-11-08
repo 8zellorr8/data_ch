@@ -57,7 +57,7 @@ export function createOperationStore({storage, getBase = getApiBase, request = a
     const pending = {...stored, status:'pending'};
     write(pending);
     try {
-      const result = await request(op.path, {method:'POST', base:op.base, body:copy(op.body), headers:{'Idempotency-Key':op.key}, timeoutMs:185000});
+      const result = await request(op.path, {method:'POST', base:op.base, body:copy(op.body), headers:{'Idempotency-Key':op.key}, timeoutMs:250000});
       // Keep the receipt until the caller reads the current server record.
       try { write({...pending, status:'succeeded', resultId:result.id, error:undefined}); } catch { /* Original key is already durable. */ }
       return result;

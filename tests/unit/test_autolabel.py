@@ -29,7 +29,7 @@ def test_autolabel_stops_at_first_quota_refusal(tmp_path, monkeypatch, dataset):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as client:
             monkeypatch.setattr(
-                autolabel, "GeminiEvaluator", partial(GeminiEvaluator, client=client)
+                autolabel, "build_evaluator", partial(GeminiEvaluator, "test-key", client=client)
             )
             return await autolabel.annotate(
                 argparse.Namespace(
