@@ -27,7 +27,7 @@ Worker принимает `POST /v1/evaluate` с заголовком `Authoriza
 }
 ```
 
-Это схема, не готовый запрос; точные поля доступны в Swagger. В ответе `result: EvaluationResult`, `metadata: AIModelMetadata`, `usage_is_local: true`. Итоговых баллов в ответе worker нет. Клиент повторно проверяет значения и дословные цитаты по исходному контексту. Тарифные токены aijuju здесь не используются; `input_tokens`/`output_tokens` описывают локальную генерацию.
+Это схема; готовое синтетическое тело находится в [examples/local-worker-request.json](../examples/local-worker-request.json), точные поля доступны в Swagger. В ответе `result: EvaluationResult`, `metadata: AIModelMetadata`, `usage_is_local: true`. Итоговых баллов в ответе worker нет. Клиент повторно проверяет значения и дословные цитаты по исходному контексту. Тарифные токены aijuju здесь не используются; `input_tokens`/`output_tokens` описывают локальную генерацию.
 
 Ключ worker отдельный, не ключ aijuju. Он уже находится в локальном `.env`, который исключён из Git. Не пересылайте весь `.env`: для подключения удалённого backend достаточно отдельных настроек worker. В репозитории только пустой [.env.example](../.env.example). Приватность GitHub не заменяет хранение секретов вне Git.
 

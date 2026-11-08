@@ -115,6 +115,35 @@ def test_worker_checks_result_against_unmodified_source(worker_case):
     assert payload == before
 
 
+@pytest.mark.parametrize("invalid_source", ["empty", "duplicate_id", "blank"])
+def test_ambiguous_or_empty_sources_never_reach_model(worker_case, invalid_source):
+    _, payload, model = worker_case
+    messages = payload["conversation"]["transcript"]
+    if invalid_source == "empty":
+        messages.clear()
+    elif invalid_source == "duplicate_id":
+        messages[1]["id"] = messages[0]["id"]
+    else:
+        for message in messages:
+            message["text"] = " "
+    with TestClient(create_worker_app(model, api_key="test-key")) as client:
+        response = client.post(
+            "/v1/evaluate", json=payload, headers={"Authorization": "Bearer test-key"}
+        )
+        assert response.status_code == 422
+        assert model.calls == 0
+
+
+def test_worker_requires_key_and_refuses_cloud_models(worker_case):
+    _, _, model = worker_case
+    with pytest.raises(RuntimeError, match="CQA_LOCAL_AI_KEY"):
+        with TestClient(create_worker_app(model, api_key="")):
+            pass
+    model.local_only = False
+    with pytest.raises(ValueError, match="local inference"):
+        create_worker_app(model, api_key="test-key")
+
+
 def test_backend_client_roundtrip_and_worker_busy(worker_case):
     context, payload, model = worker_case
 
